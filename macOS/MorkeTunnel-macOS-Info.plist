@@ -20,7 +20,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Morke</string>
+	<string>$(MORKE_DISPLAY_NAME)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -41,9 +41,11 @@
 	<dict>
 		<!-- Mach service the containing app uses to reach the extension. Apple requires an
 		     App Group as the prefix (verified against sing-box-for-apple, which uses
-		     $(APP_GROUP_IDENTIFIER).system). Morke's App Group is group.tech.twodice.morke. -->
+		     $(APP_GROUP_IDENTIFIER).system). Morke's App Group is $(MORKE_APP_GROUP), set per
+		     configuration (P75): group.tech.twodice.morke in Release, group.tech.twodice.morke.dev
+		     in Debug ("Morke Dev"), so each variant's service sits under its own group. -->
 		<key>NEMachServiceName</key>
-		<string>group.tech.twodice.morke.tunnel</string>
+		<string>$(MORKE_APP_GROUP).tunnel</string>
 		<key>NEProviderClasses</key>
 		<dict>
 			<!-- Bare principal name matches @objc(PacketTunnelProvider) in PacketTunnelProvider.swift. -->

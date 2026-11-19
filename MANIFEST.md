@@ -36,8 +36,11 @@ cannot be generated or installed, so they are inside the definition.
 **Applying the rule when something changes:**
 
 - A new file in `MorkeTunnel/` → in, automatically. That directory is a
-  file-system-synchronized Xcode group: every file added to it joins the target
-  without anyone editing the project.
+  file-system-synchronized Xcode group: every file added to it joins the iOS
+  extension target without anyone editing the project. ⚠️ The macOS system-extension
+  target (`MorkeTunnel (macOS)`) lists its sources explicitly in the project file —
+  a new file joins it only when added there (found by P9g, 2026-10-06). Either way
+  the file is in: it is compiled into the iOS extension.
 - A new file in `MorkeShared/` → in. The whole module is linked.
 - A new module linked by the extension → the whole module joins the perimeter,
   and its own licence position has to be settled before it does. Adding one is
@@ -49,34 +52,41 @@ cannot be generated or installed, so they are inside the definition.
 
 ---
 
-## Resolved list — 2026-09-11
+## Resolved list — 2026-11-19
 
 Left column is the path **in this repository**. `MorkeShared/` is published flat;
 in the Morke tree it lives at `MorkeKit/Sources/MorkeShared/`. Nothing else is
 remapped.
 
-**26 files in all:** 14 in block A, 3 in B, 2 in C and 7 in D.
+**33 files in all:** 20 in block A, 3 in B, 2 in C and 8 in D (`singbox-fork/licences.py` joined D on 2026-09-23, P3;
+`MorkeTunnel/TunnelAnalytics.swift` and five `MorkeShared/` files joined A between 2026-10-06 and 2026-11-17).
 
 ### A. Compiled into the extension — GPLv3 § 5(c)
 
 | Published path | SHA-256 | Lines |
 |---|---|---|
-| `MorkeTunnel/PacketTunnelProvider.swift` | `10ae8a47…a26390` | 464 |
-| `MorkeTunnel/SingBoxTunnel.swift` | `a95b7fa1…6d1014` | 203 |
-| `MorkeTunnel/ExtensionPlatformInterface.m` | `e27055e9…168479` | 733 |
-| `MorkeTunnel/ExtensionPlatformInterface.h` | `3674c4c1…447ed0` | 57 |
-| `MorkeTunnel/MorkeTunnelNetHelpers.c` | `4458fc8b…add071` | 116 |
-| `MorkeTunnel/MorkeTunnelNetHelpers.h` | `c92c92bf…5ab7d9` | 91 |
+| `MorkeTunnel/PacketTunnelProvider.swift` | `b00b958f…c42931` | 605 |
+| `MorkeTunnel/SingBoxTunnel.swift` | `03b383a8…bb5b75` | 323 |
+| `MorkeTunnel/TunnelAnalytics.swift` | `707b5ce5…a1f28e` | 396 |
+| `MorkeTunnel/ExtensionPlatformInterface.m` | `290b66ac…1520db` | 751 |
+| `MorkeTunnel/ExtensionPlatformInterface.h` | `8b747882…9af9fb` | 61 |
+| `MorkeTunnel/MorkeTunnelNetHelpers.c` | `dd32bae6…326033` | 140 |
+| `MorkeTunnel/MorkeTunnelNetHelpers.h` | `b5326097…d7e315` | 106 |
 | `MorkeTunnel/MorkeTunnel-Bridging-Header.h` | `f6a7ac93…90f734` | 29 |
-| `MorkeShared/AppGroup.swift` | `1387f96c…f1d0cc` | 395 |
-| `MorkeShared/MorkeLog.swift` | `7b32cfe7…4693cb` | 59 |
-| `MorkeShared/SharedKeychain.swift` | `007ff3bf…1ddf8a` | 332 |
-| `MorkeShared/SingBoxConfig.swift` | `459f7c60…929e69` | 55 |
-| `MorkeShared/TunnelDiagnostics.swift` | `34ab658f…171161` | 174 |
-| `MorkeShared/TunnelExtensionConstants.swift` | `3bafa2cf…983724` | 59 |
-| `MorkeShared/VPNSurfaceState.swift` | `56da1c95…e95d97` | 235 |
+| `MorkeShared/AnalyticsLedger.swift` | `6e2cd1dd…b7e433` | 961 |
+| `MorkeShared/AppGroup.swift` | `b5e22810…fa5e53` | 694 |
+| `MorkeShared/MorkeLog.swift` | `0af77295…929a5d` | 58 |
+| `MorkeShared/SharedKeychain.swift` | `6b10893f…70804d` | 349 |
+| `MorkeShared/SingBoxConfig.swift` | `57768dcf…af1ca0` | 56 |
+| `MorkeShared/SingBoxConfigStrip.swift` | `4aae4280…da58e6` | 159 |
+| `MorkeShared/SingBoxGVisorStack.swift` | `fa784ece…b5dbd2` | 106 |
+| `MorkeShared/TunnelConfigCache.swift` | `db0c056e…5ca9fb` | 524 |
+| `MorkeShared/TunnelControl.swift` | `37733840…2d5279` | 394 |
+| `MorkeShared/TunnelDiagnostics.swift` | `703a1a96…2b663b` | 198 |
+| `MorkeShared/TunnelExtensionConstants.swift` | `46fa2095…cdcd02` | 66 |
+| `MorkeShared/VPNSurfaceState.swift` | `129e9210…9512b7` | 237 |
 
-**14 files, 3 002 lines.**
+**20 files, 6 213 lines.**
 
 > **On that number.** The perimeter was measured at **2 079 lines** on
 > 2026-09-04 *before* the GPLv3 § 5(b) notices were written into these files;
@@ -93,6 +103,29 @@ remapped.
 > without notices is 3 002 − (7 × 25 + 7 × 40) = **2 547** lines. For this
 > snapshot quote 2 547 for the code and 3 002 for the files; the 2026-09-04 pair
 > stays correct for its moment.
+>
+> **Re-measured 2026-09-23: 14 files, 3 033 lines.** That is 3 002 plus 31 —
+> `ExtensionPlatformInterface.m` grew by 21 (the three platform-interface methods
+> libbox `v1.14` added, and one it dropped) and `TunnelDiagnostics.swift` by 10 (a
+> change made after 2026-09-11 that this list had not yet recorded). No notice
+> changed, so the code without notices is 3 033 − 455 = **2 578** lines.
+>
+> **Re-measured 2026-10-04: 14 files, 3 062 lines.** That is 3 033 plus 29 —
+> `SingBoxTunnel.swift` grew by 29 (T-CFG-67: it deletes the plaintext
+> `configuration.json` an earlier engine left, before the engine starts). No notice
+> changed, so the code without notices is 3 062 − 455 = **2 607** lines.
+>
+> **Re-measured 2026-11-19: 20 files, 6 213 lines.** That is 3 062 plus 3 151. Six files are new,
+> 2 540 lines between them: `MorkeTunnel/TunnelAnalytics.swift` (396, the 25-line tunnel notice) and,
+> each with the 40-line `MorkeShared` notice, `AnalyticsLedger.swift` (961), `SingBoxConfigStrip.swift`
+> (159), `SingBoxGVisorStack.swift` (106), `TunnelConfigCache.swift` (524) and `TunnelControl.swift`
+> (394). The fourteen already listed grew by 611 net: `AppGroup.swift` +299, `PacketTunnelProvider.swift`
+> +141, `SingBoxTunnel.swift` +91, `MorkeTunnelNetHelpers.c` +24, `SharedKeychain.swift` +17,
+> `MorkeTunnelNetHelpers.h` +15, `TunnelDiagnostics.swift` +14, `TunnelExtensionConstants.swift` +7,
+> `ExtensionPlatformInterface.h` +4, `VPNSurfaceState.swift` +2, `SingBoxConfig.swift` +1,
+> `MorkeLog.swift` −1, `ExtensionPlatformInterface.m` −3, the bridging header unchanged. Every file
+> still carries its notice (the SPDX check in the release checklist, step 3), so the notices are
+> 8 × 25 + 12 × 40 = 680 lines and the code without them is 6 213 − 680 = **5 533** lines.
 
 **One system framework joined the extension's links, and the rule adds no file
 for it.** `PacketTunnelProvider.swift` now imports Apple's `WidgetKit`, so that a
@@ -109,9 +142,9 @@ still links `MorkeShared` and `Libbox.xcframework` and nothing else of ours.
 
 | Published path | SHA-256 | Lines |
 |---|---|---|
-| `MorkeTunnel/Info.plist` | `bfba577a…0861cb` | 31 |
+| `MorkeTunnel/Info.plist` | `c63f1779…35fa02` | 31 |
 | `MorkeTunnel/MorkeTunnel.entitlements` | `9f4f660b…28e1ec` | 18 |
-| `MorkeTunnel/PrivacyInfo.xcprivacy` | `de34a393…cd93c7` | 102 |
+| `MorkeTunnel/PrivacyInfo.xcprivacy` | `232448fd…7d4f91` | 95 |
 
 These three are in the perimeter under limb (2) of the rule, and this is a
 reading, not a copy of somebody's list: without the `Info.plist` there is no
@@ -130,8 +163,8 @@ asks for.
 
 | Published path | SHA-256 | Lines |
 |---|---|---|
-| `MorkeTunnel/MorkeTunnel-macOS.entitlements` | `93dc4089…9037d4` | 24 |
-| `macOS/MorkeTunnel-macOS-Info.plist` | `17d0dea4…e47169` | 55 |
+| `MorkeTunnel/MorkeTunnel-macOS.entitlements` | `b523c86f…560ac3` | 31 |
+| `macOS/MorkeTunnel-macOS-Info.plist` | `546d442b…614215` | 57 |
 
 The same sources also build a macOS **system extension**. That build is not
 conveyed today — only the iOS application ships — so these two are not yet owed
@@ -151,7 +184,7 @@ than tidiness.
 ### D. Authored for this repository
 
 `LICENSE` · `COPYING-SCOPE.md` · `README.md` · `BUILD.md` · `MANIFEST.md` ·
-`singbox-fork/0001-morke-trim.patch` · `singbox-fork/libbox-digest.py`
+`singbox-fork/0001-morke-trim.patch` · `singbox-fork/libbox-digest.py` · `singbox-fork/licences.py`
 
 Not exported from the Morke tree; written for publication. `LICENSE` is the
 verbatim GNU GPL v3 text and **nothing else** — the scope notice that used to
@@ -171,12 +204,15 @@ shasum -a 256 LICENSE
 Source is our modified tree — not upstream's tag. The patch is that
 modification, expressed against the upstream commit so it can be reviewed in one
 sitting rather than as a re-published 8 MB tree, and applying it to
-`83b73048ff772b919af18653b78ffeaa2d48b66e` reproduces our engine source exactly.
+`c005f35300ce76427dc285481ec5695f5b179cd2` (tag `v1.14.4`) reproduces our engine
+source exactly (re-derived 2026-11-14; the `v1.14.1` base it replaces was
+`1ac1a339cb1223e9c70eae14c44411c75033c02d`).
 
 | File | SHA-256 |
 |---|---|
-| `singbox-fork/0001-morke-trim.patch` | `10d148d7f1e13ae51c7d1132c3ce47646a040cfadef2b1565fef2595413e0641` |
-| `singbox-fork/libbox-digest.py` | `11077befa29a9af88318a54fb451601e918c1b7f01debf3854f33d0b6eb7366b` |
+| `singbox-fork/0001-morke-trim.patch` | `ded97a1e8e4195e330ff71c0140367d26a9369ce31861cb03758644b98c76486` |
+| `singbox-fork/libbox-digest.py` | `7b14008f591df315c857adf3f2a55718ea679d96a1c016059d47e74f602167ff` |
+| `singbox-fork/licences.py` | `af75330f38dfd05dcd0f98a69defb1297ccff391168834319a395e3003421f8c` |
 
 `libbox-digest.py` is the checker for [BUILD.md § 2.3](BUILD.md); it is stdlib
 only, makes no network call and writes nothing.
@@ -186,8 +222,8 @@ only, makes no network call and writes nothing.
 | Not published | Why |
 |---|---|
 | `Morke.xcodeproj/` | configures targets outside the perimeter; the covered target's settings are reproduced verbatim in BUILD.md instead |
-| `Frameworks/Libbox.xcframework` | a build product, not source. Rebuild it from tag `v1.13.13` **plus `singbox-fork/0001-morke-trim.patch`** by BUILD.md § 2, and check it against the digests in § 2.3 |
-| `MorkeKit/Sources/{MorkeFeatures,MorkeServices,MorkeModels,MorkeGlobe,MorkeDesignSystem,PlatformKit}` | linked by the app, never by the extension |
+| `Frameworks/Libbox.xcframework` | a build product, not source. Rebuild it from commit `c005f353…` (tag `v1.14.4`) **plus `singbox-fork/0001-morke-trim.patch`** by BUILD.md § 2, and check it against the digests in § 2.3 |
+| `MorkeKit/Sources/{MorkeFeatures,MorkeServices,MorkeModels,MorkeDesignSystem,PlatformKit}` | linked by the app, never by the extension |
 | `MorkeTunnelMac/main.swift` | the macOS system-extension executable host; not compiled into the iOS appex |
 | `MorkeTunnelTests/`, every other test target | not compiled into the extension |
 | `Config/Debug.xcconfig`, `Config/Release.xcconfig` | the app's configuration, and gitignored locally |
@@ -233,8 +269,8 @@ cp -R publish/tunnel-source/singbox-fork "$OUT/"
 ```
 
 The first `find` is the rule expressed as a command: `MorkeTunnel/` is a
-file-system-synchronized Xcode group, so its contents and the target's contents
-are the same set by construction. That is why the export is a directory copy and
+file-system-synchronized Xcode group, so its contents and the iOS target's contents
+are the same set by construction (the macOS target compiles a subset of it). That is why the export is a directory copy and
 not a hand-kept file list — a hand-kept list is what goes stale.
 
 **Then, before publishing, re-run the safety sweep.** It is not a formality; it
@@ -245,12 +281,14 @@ grep -rniE 'api\.morkenet|morkenet\.com|https?://|apiKey|secret|password|token' 
 grep -rn 'URLSession' "$OUT"
 ```
 
-Expected on 2026-09-11: no live secret, no API base URL, and no `URLSession` in
+Expected on 2026-09-23, and read again on 2026-11-19 with the same result: no live secret, no API base URL, and no `URLSession` in
 any source file — the extension makes no control-plane call at all; the only
 `URLSession` matches are sentences in this repository's documents and in
 `PrivacyInfo.xcprivacy` saying so. The `https://`
 matches are Apple's plist DTD declarations, links in comments, and the GPL's own
 `gnu.org` URL. One real identifier is present and is published knowingly: the
 Apple Team ID `VM3XX8889Q`, in `MorkeShared/SharedKeychain.swift`, as a
-documented fallback Keychain access-group prefix. See
+documented fallback Keychain access-group prefix, and since 2026-11-17 in
+`MorkeShared/TunnelControl.swift` as `teamIdentifier`, the team the Mac extension's
+code-signing requirement names (and in `BUILD.md` as `DEVELOPMENT_TEAM`). See
 [README.md § A note on the Apple Team ID](README.md#a-note-on-the-apple-team-id).

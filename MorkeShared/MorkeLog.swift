@@ -41,16 +41,15 @@
 import Foundation
 
 // Canonical os_log subsystem for every target that links MorkeShared directly (MorkeServices,
-// MorkeTunnel). Mirrors the `tech.twodice.morke` namespace documented in
-// SharedKeychain.swift:13-17 (bundle id · App Group · os_log subsystem).
+// MorkeTunnel, MorkeWidget). Mirrors the `tech.twodice.morke` namespace documented in
+// SharedKeychain.swift's "Two-namespace split" note (bundle id · App Group · os_log subsystem).
 //
-// MorkeFeatures (App/FeatureLog.swift) and MorkeGlobe (GlobeLog.swift) deliberately do NOT
-// depend on MorkeShared (Package.swift's dependency-graph comments), so each keeps its OWN
-// module-local mirror of this same string; the ObjC `os_log_create` call in
-// MorkeTunnel/ExtensionPlatformInterface.m is a fourth, independent mirror. All four MUST stay
-// byte-identical — renaming one but not the others silently splits the Console.app / os_log
-// filter namespace the device smoke-test relies on, with no compile error (same failure shape
-// as the SharedKeychain.swift:16-17 warning).
+// MorkeFeatures (App/FeatureLog.swift) deliberately does NOT depend on MorkeShared (Package.swift's
+// dependency-graph comments), so it keeps its OWN module-local mirror of this same string; the ObjC
+// `os_log_create` call in MorkeTunnel/ExtensionPlatformInterface.m is a third, independent mirror.
+// All three MUST stay byte-identical — renaming one but not the others silently splits the
+// Console.app / os_log filter namespace the device smoke-test relies on, with no compile error (same
+// failure shape as the warning in SharedKeychain.swift's "Two-namespace split" note).
 public enum MorkeLog {
     // nonisolated: read from actor-isolated call sites (VPNCore, AppAttestCoordinator,
     // ConfigCache) as well as MainActor ones. Immutable Sendable value, so opting out of

@@ -30,9 +30,13 @@ import MorkeShared
 
 private let singBoxErrorDomain = "SingBoxTunnel"
 
+// Same subsystem and category as PacketTunnelProvider, so a start reads as one timeline.
+private let log = Logger(subsystem: MorkeLog.subsystem, category: "tunnel")
+
 // Minimal sing-box engine wrapper for the Network Extension target.
-// Vendored engine: sing-box v1.13.13 — see docs/singbox-integration.md and Frameworks/LIBBOX_VERSION.
-// Owns the LibboxCommandServer lifecycle: setup → start → stop.
+// Vendored engine: sing-box v1.14.4, modified — see Docs/reference/singbox-integration.md and Frameworks/LIBBOX_VERSION.
+// Owns the LibboxCommandServer lifecycle: setup → start → stop — and, on iOS, after a start that threw,
+// discardFailedStart → start ONCE more (T-ROUTE-8).
 //
 // @unchecked Sendable: all mutable state (commandServer, platformInterface, stopped) is guarded
 // by `lock` (see below), and the class is purpose-built for cross-thread use — start() runs on a
@@ -41,13 +45,10 @@ private let singBoxErrorDomain = "SingBoxTunnel"
 // share; this is a real conformance, not a checker silencer.
 final class SingBoxTunnel: @unchecked Sendable {
 
-    // commandServer/platformInterface are written on a background queue (start() runs
-    // on DispatchQueue.global from PacketTunnelProvider) and read/cleared on the NE
-    // provider queue (stop/pause/wake). Guard the pointer get/set with an unfair lock
-    // so the cross-thread access has a defined happens-before and ARC cannot over-release
-    // a field mid-teardown. The lock protects ONLY the pointers — every libbox call is
-    // made on a local copy taken OUTSIDE the lock, preserving the deadlock-safe design
-    // where box.start() (and openTun's semaphore wait) runs off the provider queue.
+    // The unfair lock gives the cross-thread pointer get/set (header above) a defined happens-before,
+    // so ARC cannot over-release a field mid-teardown. It protects ONLY the pointers — every libbox
+    // call is made on a local copy taken OUTSIDE the lock, preserving the deadlock-safe design where
+    // box.start() (and openTun's semaphore wait) runs off the provider queue.
     private let lock = OSAllocatedUnfairLock()
     private var commandServer: LibboxCommandServer?
     private var platformInterface: ExtensionPlatformInterface?
@@ -56,17 +57,21 @@ final class SingBoxTunnel: @unchecked Sendable {
     // toggled off during a slow connect; NE start-timeout). stop() latches this under the lock
     // as it detaches the fields, so it wins the race deterministically; start() re-checks it
     // under the lock at every publication/use point and aborts instead of publishing onto (or
-    // starting the engine of) a stopped tunnel. libbox v1.13.13 has no closed-state guard of
-    // its own: a post-close start()/startOrReloadService() resurrects a zombie engine or
-    // panics on the closed subscriber channels. The checks shrink the race window to the few
-    // instructions between a check and the following libbox call — it cannot be zero without
-    // holding the lock across libbox (forbidden: deadlock). start() runs at most once per
-    // extension process, so the latch never needs resetting.
+    // starting the engine of) a stopped tunnel. libbox guards only part of this itself: at the
+    // pinned v1.14.1 a post-close startOrReloadService() returns os.ErrClosed, but start() listens
+    // again, and nothing in libbox covers a stop() that ran before the server was published (v1.13.13
+    // had no guard at all: a zombie engine, or a panic on the closed subscriber channels). The checks
+    // shrink the race window to the few instructions between a check and the following libbox call —
+    // it cannot be zero without holding the lock across libbox (forbidden: deadlock). start() runs at
+    // most twice per object — the second time only after discardFailedStart (T-ROUTE-8) — and only
+    // stop() sets the latch, so it never needs resetting.
     private var stopped = false
 
     // Initialises libbox, creates the command server, and starts the engine from a JSON config.
-    // Must be called from startTunnel(_:completionHandler:).
-    func start(configJSON: String, provider: NEPacketTunnelProvider) throws {
+    // Must be called from startTunnel(_:completionHandler:). True: the engine started. False: a
+    // stop() won the race and the engine was not started (the stop path owns the teardown).
+    @discardableResult
+    func start(configJSON: String, provider: NEPacketTunnelProvider) throws -> Bool {
         let iface = ExtensionPlatformInterface(provider: provider)
         // Lifecycle guard 1: stop() already won (e.g. stopTunnel landed before this block ran —
         // F-4). Nothing was published, so stop() saw nils and tore nothing down: reset the
@@ -77,7 +82,7 @@ final class SingBoxTunnel: @unchecked Sendable {
         if stopped {
             lock.unlock()
             iface.reset()
-            return
+            return false
         }
         platformInterface = iface
         lock.unlock()
@@ -88,6 +93,20 @@ final class SingBoxTunnel: @unchecked Sendable {
             throw NSError(domain: singBoxErrorDomain, code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "App Group container not found — check entitlements"])
         }
+
+        // T-CFG-67: delete the plaintext config copy an earlier engine left behind. Every libbox before
+        // 1.14.1-morke.2 wrote the whole sing-box config (the per-account VLESS UUID and the REALITY
+        // params) to <basePath>/configuration.json on each start, and nothing deleted it; morke.2 writes
+        // nothing. It must run BEFORE LibboxSetup: Setup archives a pending crash log and copies this
+        // file into the crash report beside it. Best-effort — the engine starts from configJSON in
+        // memory, never from the file. TunnelWorkspace.wipe(container:) removes it on the app side too.
+        removeStaleConfigSnapshot(in: container)
+#if os(macOS)
+        // T-MAC-15: and the rest of the engine's workspace, before LibboxSetup for the reason above —
+        // Setup would archive a crashed session's log into Working/crash_reports. The previous stop
+        // already removed it all; this covers a session that ended without one (a crash, a kill).
+        Self.scrubWorkspace(in: container, phase: "start")
+#endif
 
         let setupOpts = LibboxSetupOptions()
         setupOpts.basePath    = container.path
@@ -106,9 +125,9 @@ final class SingBoxTunnel: @unchecked Sendable {
         // iOS 15+; see roadmap T-CFG-16). Two knobs:
         //  (1) oomKillerEnabled: libbox's own OOM killer, so the engine self-limits rather than
         //      leaving the OS as the only backstop.
-        //  (2) oomMemoryLimit: an explicit byte ceiling. Left 0 (unset) before T-CFG-30, and 0's
-        //      meaning (a sane NE default vs. no effective ceiling / no Go GC soft-limit) is not
-        //      determinable from the vendored binary, so we set it. Derived AT RUNTIME (CLAUDE.md:
+        //  (2) oomMemoryLimit: an explicit byte ceiling (T-CFG-30), because what 0 (unset) means — a
+        //      sane NE default, or no effective ceiling and no Go GC soft-limit — cannot be told
+        //      from the vendored binary. Derived AT RUNTIME (CLAUDE.md:
         //      never hardcode) from os_proc_available_memory() (os/proc.h, iOS 13+), the bytes this
         //      process can still allocate before jetsam: read here pre-engine it approximates the
         //      whole headroom. Give libbox 75% and keep 25% as the buffer that both absorbs the
@@ -122,7 +141,7 @@ final class SingBoxTunnel: @unchecked Sendable {
         // os_proc_available_memory() (os/proc.h) is iOS/tvOS/watchOS-only. iOS derives the ceiling
         // from live jetsam headroom (rationale above); a macOS system extension has no comparable
         // jetsam budget and the symbol is unavailable there, so skip the explicit limit and rely on
-        // oomKillerEnabled alone. The iOS branch is unchanged — byte-identical to the pre-macOS build.
+        // oomKillerEnabled alone.
 #if os(iOS)
         let availableBytes = os_proc_available_memory()
         if availableBytes > (8 << 20) {  // 8 MiB floor: below this, treat the reading as unusable
@@ -148,7 +167,7 @@ final class SingBoxTunnel: @unchecked Sendable {
         if stopped {
             lock.unlock()
             server.close()
-            return
+            return false
         }
         commandServer = server
         lock.unlock()
@@ -158,14 +177,15 @@ final class SingBoxTunnel: @unchecked Sendable {
         // touch the server again (a second close() would re-close the Go subscriber channels:
         // panic); a plain return is the correct local cleanup.
         lock.lock()
-        if stopped { lock.unlock(); return }
+        if stopped { lock.unlock(); return false }
         lock.unlock()
         try server.start()
 
         lock.lock()
-        if stopped { lock.unlock(); return }
+        if stopped { lock.unlock(); return false }
         lock.unlock()
         try server.startOrReloadService(configJSON, options: LibboxOverrideOptions())
+        return true
     }
 
     // Stops the engine and releases all libbox resources.
@@ -185,11 +205,104 @@ final class SingBoxTunnel: @unchecked Sendable {
         platformInterface = nil
         lock.unlock()
 
+        tearDown(server, iface)
+    }
+
+    // T-ROUTE-8: stop()'s teardown for a start that threw, WITHOUT the latch, so this object can be
+    // started once more — PacketTunnelProvider's retry without the Smart merge. The provider's
+    // `singBox` keeps pointing at this object, so a stopTunnel that lands at any point still reaches
+    // the one latch: it wins, and the retry's start() aborts at its next guard as a first start does.
+    // False — nothing torn down, nothing to retry — when stop() already won: the session is ending,
+    // and stop() owns its teardown.
+    //
+    // WHY A SECOND START IN THIS PROCESS IS SAFE (read in the pinned 1.14.1 tree with the morke.2
+    // patch applied, 2026-10-26). Process-global libbox state is set again, not accumulated:
+    // LibboxSetup reassigns its option globals, its MkdirAll is idempotent, and its crash log is
+    // re-pointed (debug.SetCrashOutput replaces an earlier call; the log of a failed start is empty
+    // and is not archived); the OOM killer's memory-pressure source is reference-counted across
+    // service instances; log.SetStdLogger is replaced by the next instance. Everything else is per
+    // command server — a new context with its own registries (baseContext), its own gRPC listener on
+    // <basePath>/command.sock, which Start() removes before it listens, its own OOM recorder — or per
+    // platform interface, which start() makes new. The TUN fd libbox hands sing-tun is a dup of the
+    // provider's packetFlow descriptor (platformInterfaceWrapper.OpenInterface), so closing an engine
+    // instance never closes the provider's. sing-box's own reload (StartOrReloadService) builds a new
+    // engine instance in the same process by design. A list the engine refuses fails box.New at
+    // router.Initialize, before any inbound is created, the platform interface is initialised or
+    // openTun runs: nothing was started, and CloseService finds nothing to close. Not measured: the
+    // oomMemoryLimit start() derives again from os_proc_available_memory() may read a little lower
+    // after a failed start.
+    func discardFailedStart() -> Bool {
+        lock.lock()
+        if stopped {
+            lock.unlock()
+            return false
+        }
+        let server = commandServer
+        let iface  = platformInterface
+        commandServer = nil
+        platformInterface = nil
+        lock.unlock()
+
+        tearDown(server, iface)
+        return true
+    }
+
+    // The teardown both paths share, on locals detached under the lock — never called holding it.
+    private func tearDown(_ server: LibboxCommandServer?, _ iface: ExtensionPlatformInterface?) {
         try? server?.closeService()
         iface?.reset()          // must run before close() — see ExtensionPlatformInterface.h
         server?.close()
     }
 
+    // FileManager only: MorkeTunnel takes no new dependency for this. Logged as numbers and the fact
+    // of removal only — never the file's content or size.
+    private func removeStaleConfigSnapshot(in container: URL) {
+        do {
+            try FileManager.default.removeItem(at: container.appendingPathComponent("configuration.json"))
+            log.notice("start: stale configuration snapshot removed")
+        } catch CocoaError.fileNoSuchFile {
+            // The normal case from the first morke.2 start on: nothing to remove.
+        } catch {
+            if let code = ((error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError)
+                .flatMap({ $0.domain == NSPOSIXErrorDomain ? $0.code : nil }) {
+                log.error("start: stale configuration snapshot delete failed, errno=\(code, privacy: .public)")
+            } else {
+                log.error("start: stale configuration snapshot delete failed, errno unavailable")
+            }
+        }
+    }
+
+#if os(macOS)
+    // T-MAC-15: removes the engine's workspace — AppGroup.removeEngineWorkspace's list — from THIS
+    // process's App-Group container. macOS only: the system extension runs as root, so its container is
+    // root's and the app's TunnelWorkspace.wipe() never reaches it (T-MAC-14); on iOS the app and the
+    // appex share one container and the wipe already works. Called before LibboxSetup on every start
+    // and from stopTunnel once the engine is stopped, so the engine's files live only while a tunnel
+    // runs. Synchronous local file removal only, the same class of work as the stop path's other
+    // App-Group writes: no retry, no wait, no throw. Logged as the item's name from the list and its
+    // errno, never a path read from disk or anything about the config.
+    static func scrubWorkspace(in container: URL? = nil, phase: String) {
+        guard let container = container ?? FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: AppGroup.appGroupID
+        ) else {
+            log.error("\(phase, privacy: .public): engine workspace scrub skipped, App Group container not found")
+            return
+        }
+        let failures = AppGroup.removeEngineWorkspace(in: container)
+        guard !failures.isEmpty else {
+            log.notice("\(phase, privacy: .public): engine workspace scrubbed")
+            return
+        }
+        for failure in failures {
+            if let code = failure.errno {
+                log.error("\(phase, privacy: .public): engine workspace \(failure.item, privacy: .public) delete failed, errno=\(code, privacy: .public)")
+            } else {
+                log.error("\(phase, privacy: .public): engine workspace \(failure.item, privacy: .public) delete failed, errno unavailable")
+            }
+        }
+    }
+
+#endif
     // Forward NEPacketTunnelProvider sleep/wake to libbox so it can pause keepalives.
     // Read the pointer under the lock, then call libbox on the local copy outside it.
     func pause() {
@@ -199,5 +312,12 @@ final class SingBoxTunnel: @unchecked Sendable {
     func wake() {
         lock.lock(); let server = commandServer; lock.unlock()
         server?.wake()
+    }
+    // libbox 1.14.4: on iOS `pause()` sets the engine's device pause and `wake()` no longer ends it
+    // (experimental/libbox/command_server.go — upstream's own client ends it from the screen state,
+    // ScreenStateObserver → `wakeNow`). This ends it unconditionally. Same locking as above.
+    func wakeNow() {
+        lock.lock(); let server = commandServer; lock.unlock()
+        server?.wakeNow()
     }
 }

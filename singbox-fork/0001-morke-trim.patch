@@ -1,18 +1,19 @@
-diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/cmd/internal/build_libbox/main.go sing-box-morke/cmd/internal/build_libbox/main.go
---- a/cmd/internal/build_libbox/main.go	2026-06-07 19:05:39
-+++ b/cmd/internal/build_libbox/main.go	2026-09-04 11:13:08
+diff --git a/cmd/internal/build_libbox/main.go b/cmd/internal/build_libbox/main.go
+index 5b2d9e2..b56f7ba 100644
+--- a/cmd/internal/build_libbox/main.go
++++ b/cmd/internal/build_libbox/main.go
 @@ -1,3 +1,18 @@
-+// Modified on 2026-09-04 by Two Dice Ltd for the Morke VPN client.
++// Modified on 2026-09-23 and 2026-11-14 by Two Dice Ltd for the Morke VPN client.
 +//
-+// Changes from sing-box v1.13.13:
++// Changes from sing-box v1.14.4 (first made on v1.14.1 on 2026-09-23, re-derived on v1.14.4 on
++// 2026-11-14):
 +//   - buildApple: the Apple bind target drops `tvos` and `tvossimulator`.
-+//   - sharedTags: `with_quic`, `with_wireguard`, `with_naive_outbound`, `with_tailscale` and the
-+//     `ts_omit_*` tags that only qualify it are removed.
++//   - sharedTags: `with_quic`, `with_wireguard`, `with_naive_outbound`, `with_clash_api`,
++//     `with_usbip`, `with_openvpn`, `with_openconnect`, `with_tailscale` and the `ts_omit_*` tags
++//     that only qualify it are removed.
 +//   - darwinTags: `with_dhcp` is removed.
 +//   - the version stamped into constant.Version is a fixed fork string rather than `git describe`,
 +//     so the build does not depend on VCS state and is byte-stable across rebuilds.
-+//
-+// `with_clash_api` is DELIBERATELY RETAINED — see the comment above sharedTags.
 +//
 +// This file is part of a modified copy of sing-box and remains under the GNU General Public
 +// License version 3 or (at your option) any later version.
@@ -20,17 +21,17 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/cmd/inter
  package main
  
  import (
-@@ -16,6 +31,9 @@
+@@ -16,6 +31,9 @@ import (
  	"github.com/sagernet/sing/common/shell"
  )
  
 +// ForkVersion is stamped into constant.Version. Bump the suffix when the fork changes.
-+const ForkVersion = "1.13.13-morke.1"
++const ForkVersion = "1.14.4-morke.1"
 +
  var (
  	debugEnabled bool
  	target       string
-@@ -56,17 +74,36 @@
+@@ -56,17 +74,38 @@ var (
  func init() {
  	sharedFlags = append(sharedFlags, "-trimpath")
  	sharedFlags = append(sharedFlags, "-buildvcs=false")
@@ -43,39 +44,41 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/cmd/inter
 +	// resulting archive differ between an in-tree build and a build from an exported tarball. The
 +	// string names the upstream base it is derived from, as GPLv3 section 5(a) provenance.
 +	currentTag := ForkVersion
- 	sharedFlags = append(sharedFlags, "-ldflags", "-X github.com/sagernet/sing-box/constant.Version="+currentTag+" -X internal/godebug.defaultGODEBUG=multipathtcp=0 -s -w -buildid=  -checklinkname=0")
- 	debugFlags = append(debugFlags, "-ldflags", "-X github.com/sagernet/sing-box/constant.Version="+currentTag+" -X internal/godebug.defaultGODEBUG=multipathtcp=0 -checklinkname=0")
+ 	sharedFlags = append(sharedFlags, "-ldflags", build_shared.LinkerFlags(currentTag, false))
+ 	debugFlags = append(debugFlags, "-ldflags", build_shared.LinkerFlags(currentTag, true))
  
--	sharedTags = append(sharedTags, "with_gvisor", "with_quic", "with_wireguard", "with_utls", "with_naive_outbound", "with_clash_api", "badlinkname", "tfogo_checklinkname0")
+-	sharedTags = append(sharedTags, "with_gvisor", "with_quic", "with_wireguard", "with_utls", "with_naive_outbound", "with_clash_api", "with_usbip", "with_openvpn", "with_openconnect", "badlinkname", "tfogo_checklinkname0")
 -	darwinTags = append(darwinTags, "with_dhcp", "grpcnotrace")
 -	// memcTags = append(memcTags, "with_tailscale")
 -	sharedTags = append(sharedTags, "with_tailscale", "ts_omit_logtail", "ts_omit_ssh", "ts_omit_drive", "ts_omit_taildrop", "ts_omit_webclient", "ts_omit_doctor", "ts_omit_capture", "ts_omit_kube", "ts_omit_aws", "ts_omit_synology", "ts_omit_bird")
 +	// Morke: the optional-feature tag set is cut to what the client's own config contract can
 +	// reach. SingBoxConfigValidator allows exactly {vless, direct, block, dns} as egress, `tun` as
-+	// the only ingress, no `endpoints`, and no `experimental` key but `cache_file`; /auth/config
-+	// emits VLESS-REALITY over `tun` with a DoT resolver. So:
++	// the only ingress, no `endpoints`, no `services`, no `certificate_providers`, and no
++	// `experimental` key but `cache_file`; /auth/config emits VLESS-REALITY over `tun` with a DoT
++	// resolver. So:
 +	//   with_gvisor  KEPT — the kill switch (includeAllNetworks) forces tun.stack = "gvisor".
 +	//   with_utls    KEPT — REALITY is built on uTLS; removing it removes the proxy.
-+	//   with_quic    REMOVED — hysteria / hysteria2 / tuic egress and the DoQ / DoH3 resolvers.
-+	//                Not in the egress allow-set; the resolver is DoT.
++	//   with_quic    REMOVED — hysteria / hysteria2 / tuic egress, the Hysteria Realm service and
++	//                the DoQ / DoH3 resolvers. Not in the egress allow-set; the resolver is DoT.
 +	//   with_wireguard REMOVED — an `endpoints` type, and the validator refuses every endpoint.
 +	//   with_tailscale REMOVED — likewise an endpoint, plus a DERP service and a cert provider.
 +	//                The ts_omit_* tags only qualified it and go with it.
-+	//   with_naive_outbound REMOVED — not in the egress allow-set. It also links a 42 MB
-+	//                prebuilt Chromium libcronet.a.
++	//   with_openvpn / with_openconnect REMOVED — new in v1.14, both `endpoints` types plus the DNS
++	//                servers that read what those endpoints push; no endpoint can exist.
++	//   with_usbip   REMOVED — new in v1.14, USB/IP `services`; the validator refuses `services`.
++	//   with_naive_outbound REMOVED — not in the egress allow-set. It also links a prebuilt
++	//                Chromium libcronet.a.
++	//   with_clash_api REMOVED — v1.14 no longer turns a PlatformLogWriter into a Clash API
++	//                server (box.go builds one only from an `experimental.clash_api` block, which
++	//                the validator refuses), and daemon/ now imports experimental/clashmode instead
++	//                of experimental/clashapi, so the tag alone unlinks the control server.
 +	//   with_dhcp    REMOVED — a DHCP-discovered DNS transport; the resolver is server-templated.
-+	//
-+	// with_clash_api is RETAINED, and that is not an oversight. daemon/instance.go always passes a
-+	// PlatformLogWriter to box.New, and box.go turns that into needClashAPI, so a libbox build
-+	// without the tag fails every start with "create clash-server: invalid argument". Removing it
-+	// needs a change to box.go AND to daemon/started_service.go, which imports experimental/clashapi
-+	// unconditionally — i.e. the tag alone does not unlink the package either way.
-+	sharedTags = append(sharedTags, "with_gvisor", "with_utls", "with_clash_api", "badlinkname", "tfogo_checklinkname0")
++	sharedTags = append(sharedTags, "with_gvisor", "with_utls", "badlinkname", "tfogo_checklinkname0")
 +	darwinTags = append(darwinTags, "grpcnotrace")
  	notMemcTags = append(notMemcTags, "with_low_memory")
  	debugTags = append(debugTags, "debug")
  }
-@@ -195,7 +232,9 @@
+@@ -195,7 +234,9 @@ func buildApple() {
  	} else if debugEnabled {
  		bindTarget = "ios"
  	} else {
@@ -86,12 +89,40 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/cmd/inter
  	}
  
  	args := []string{
-diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/cmd/internal/sizeprobe/main.go sing-box-morke/cmd/internal/sizeprobe/main.go
---- a/cmd/internal/sizeprobe/main.go	1970-01-01 01:00:00
-+++ b/cmd/internal/sizeprobe/main.go	2026-09-04 16:48:38
-@@ -0,0 +1,28 @@
-+// Added on 2026-09-04 by Two Dice Ltd for the Morke VPN client — part of the same modification
-+// of sing-box v1.13.13 recorded in the headers of the other files this patch touches.
+diff --git a/daemon/started_service_tailscale_ssh.go b/daemon/started_service_tailscale_ssh.go
+index bc8b372..3cb2924 100644
+--- a/daemon/started_service_tailscale_ssh.go
++++ b/daemon/started_service_tailscale_ssh.go
+@@ -1,3 +1,18 @@
++//go:build with_tailscale
++
++// Modified on 2026-09-23 and 2026-11-14 by Two Dice Ltd for the Morke VPN client.
++//
++// Changes from sing-box v1.14.4 (first made on v1.14.1): this file now builds only with
++// `with_tailscale`, and started_service_tailscale_ssh_stub.go answers the same gRPC method
++// otherwise — the pattern upstream already uses for USB/IP (started_service_usbip.go /
++// started_service_usbip_stub.go). StartTailscaleSSHSession opens an SSH session to a Tailscale peer
++// through a Tailscale endpoint, and a build without `with_tailscale` cannot construct one, so the
++// method could never succeed there; ungated, it still linked golang.org/x/crypto/ssh into every
++// build.
++//
++// This file is part of a modified copy of sing-box and remains under the GNU General Public
++// License version 3 or (at your option) any later version.
++
+ package daemon
+ 
+ import (
+diff --git a/daemon/started_service_tailscale_ssh_stub.go b/daemon/started_service_tailscale_ssh_stub.go
+new file mode 100644
+index 0000000..5097b83
+--- /dev/null
++++ b/daemon/started_service_tailscale_ssh_stub.go
+@@ -0,0 +1,25 @@
++//go:build !with_tailscale
++
++// Added on 2026-09-23 by Two Dice Ltd for the Morke VPN client — part of the same modification of
++// sing-box recorded in started_service_tailscale_ssh.go (made on v1.14.1, carried to v1.14.4 on
++// 2026-11-14).
 +//
 +// Copyright (C) 2026 Two Dice Ltd
 +//
@@ -99,35 +130,239 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/cmd/inter
 +// License version 3 or (at your option) any later version — the same terms as the work it is
 +// added to.
 +
-+// Command sizeprobe links exactly what experimental/libbox links, so the effect of a build-tag or
-+// registry change on the LINKED SET can be measured in seconds instead of a full `gomobile bind`.
-+// It is how the removals in include/registry.go were verified, one at a time, against real binary
-+// sizes rather than against what looked unused.
-+//
-+// It is NOT required to generate, install or run MorkeTunnel.appex, and nothing imports it: it is
-+// its own `main`, so it changes neither Libbox.xcframework nor any published digest. It is
-+// published because a claim about what was removed is worth more with the instrument beside it.
-+package main
++package daemon
 +
 +import (
-+	"fmt"
-+
-+	"github.com/sagernet/sing-box/experimental/libbox"
++	"google.golang.org/grpc"
++	"google.golang.org/grpc/codes"
++	"google.golang.org/grpc/status"
 +)
 +
-+func main() {
-+	fmt.Println(libbox.Version())
++func (s *StartedService) StartTailscaleSSHSession(
++	server grpc.BidiStreamingServer[TailscaleSSHClientMessage, TailscaleSSHServerMessage],
++) error {
++	return status.Error(codes.Unimplemented, "Tailscale SSH is not included in this build, rebuild with -tags with_tailscale")
 +}
-diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/include/registry.go sing-box-morke/include/registry.go
---- a/include/registry.go	2026-06-07 19:05:39
-+++ b/include/registry.go	2026-09-04 11:11:54
-@@ -1,45 +1,37 @@
-+// Modified on 2026-09-04 by Two Dice Ltd for the Morke VPN client.
+diff --git a/experimental/libbox/bridge_service_darwin.go b/experimental/libbox/bridge_service_darwin.go
+index 3a9db58..29a2b5c 100644
+--- a/experimental/libbox/bridge_service_darwin.go
++++ b/experimental/libbox/bridge_service_darwin.go
+@@ -1,5 +1,16 @@
+-//go:build darwin
++//go:build ignore
+ 
++// Modified on 2026-09-23 and 2026-11-14 by Two Dice Ltd for the Morke VPN client.
 +//
-+// Changes from sing-box v1.13.13:
++// Changes from sing-box v1.14.4: the file is excluded from every build (`ignore`; upstream builds
++// it on `darwin`, which covers iOS and macOS). NewBridgeService wraps protocol/bridge, a privileged
++// L3 forwarder that upstream supports on iOS only when jailbroken; it is called only by a host app,
++// and the Morke tunnel (the iOS Network Extension and the macOS system extension alike) never calls
++// it, so on both Apple platforms it now resolves to bridge_stub.go. iOS was excluded on 2026-09-23
++// (v1.14.1), macOS on 2026-11-14 (v1.14.4).
++//
++// This file is part of a modified copy of sing-box and remains under the GNU General Public
++// License version 3 or (at your option) any later version.
+ package libbox
+ 
+ import (
+diff --git a/experimental/libbox/bridge_stub.go b/experimental/libbox/bridge_stub.go
+index e053b92..e96f380 100644
+--- a/experimental/libbox/bridge_stub.go
++++ b/experimental/libbox/bridge_stub.go
+@@ -1,5 +1,13 @@
+-//go:build !linux && !darwin
++//go:build !linux
+ 
++// Modified on 2026-09-23 and 2026-11-14 by Two Dice Ltd for the Morke VPN client.
++//
++// Changes from sing-box v1.14.4: the build constraint also covers iOS (2026-09-23) and macOS
++// (2026-11-14) — the exact complement of bridge_service_linux.go's `linux`, now that
++// bridge_service_darwin.go builds nowhere.
++//
++// This file is part of a modified copy of sing-box and remains under the GNU General Public
++// License version 3 or (at your option) any later version.
+ package libbox
+ 
+ import E "github.com/sagernet/sing/common/exceptions"
+diff --git a/experimental/libbox/log.go b/experimental/libbox/log.go
+index 992cf8f..43aef5b 100644
+--- a/experimental/libbox/log.go
++++ b/experimental/libbox/log.go
+@@ -1,5 +1,20 @@
+ //go:build darwin || linux || windows
+ 
++// Modified on 2026-09-23, 2026-10-04 and 2026-11-14 by Two Dice Ltd for the Morke VPN client.
++//
++// Changes from sing-box v1.14.4 (first made on v1.14.1; carried to v1.14.4 on 2026-11-14):
++//   - CreateZipArchive no longer encrypts (2026-09-23). v1.14 added an `encrypt` mode that seals a
++//     report archive to SagerNet's own age recipient, which links filippo.io/age and
++//     filippo.io/hpke. CreateZipArchive is called only by a host app exporting reports to upstream;
++//     the Morke tunnel never calls it, so the mode now returns an error instead.
++//   - saveConfigSnapshot writes nothing (2026-10-04). Upstream writes the whole configuration to
++//     <basePath>/configuration.json, mode 0666, on every start, and nothing ever deletes it. A
++//     Morke configuration carries a live proxy credential, which the client keeps only in the
++//     Keychain. Nothing reads the file back for behaviour; see the function.
++//
++// This file is part of a modified copy of sing-box and remains under the GNU General Public
++// License version 3 or (at your option) any later version.
++
+ package libbox
+ 
+ import (
+@@ -12,7 +27,7 @@ import (
+ 	"runtime/debug"
+ 	"time"
+ 
+-	"filippo.io/age"
++	E "github.com/sagernet/sing/common/exceptions"
+ )
+ 
+ type crashReportMetadata struct {
+@@ -62,9 +77,13 @@ func configSnapshotPath() string {
+ }
+ 
+ func saveConfigSnapshot(configContent string) {
+-	snapshotPath := configSnapshotPath()
+-	os.WriteFile(snapshotPath, []byte(configContent), 0o666)
+-	chownReport(snapshotPath)
++	// Morke: write nothing — a credential at rest. Upstream saves configContent here so that crash,
++	// OOM and power reports can copy it; the Morke configuration holds the per-account VLESS UUID
++	// and the REALITY parameters, and the client keeps it only in the Keychain. Nothing reads the
++	// file back for behaviour: the engine starts from configContent in memory, and the only reader,
++	// copyConfigSnapshot (report.go), copies it into a report and returns early when it is absent,
++	// so the reports simply go without it. The function and its call stay so upstream's shape
++	// stays recognisable.
+ }
+ 
+ func redirectStderr(path string) error {
+@@ -96,6 +115,9 @@ func redirectStderr(path string) error {
+ }
+ 
+ func CreateZipArchive(sourcePath string, destinationPath string, encrypt bool) error {
++	if encrypt {
++		return E.New("report encryption is not included in this build")
++	}
+ 	sourceInfo, err := os.Stat(sourcePath)
+ 	if err != nil {
+ 		return err
+@@ -114,19 +136,6 @@ func CreateZipArchive(sourcePath string, destinationPath string, encrypt bool) e
+ 
+ 	var archiveWriter io.Writer = destinationFile
+ 	var encryptedWriter io.WriteCloser
+-	if encrypt {
+-		const reportEncryptionRecipient = "age1pq18zn32skjt2ns56lja2nl4sztmx5u820fp67z2dg6ueyffy5l30gkdlae58a0qfd0ms5729gsdenkxdd2s55eh9g6nx80s9e757jf853p5r48vs2wkzyqyde5qd2hqpv9f5sfejn2svyqxse22pzz2l5vee4g90j0d2jsmycgwv4v4y79dshdc8jwjvkuhsawt7s22vgccdww2fpfxjke9gje4ugkgwn8938ejhh6y63u0uf5x0gxn706x0j00nwkesy3w3yryqun23f2e2zxxfv85wnwtaf5rsu4arrkhk6jsazqcjtps8qv0sz3z966hyspxyq7zqsgntyvhzqxpal6ex6khg267fpe5lxzknugynw48fsmqugncysxgpyprljmnce6dehtv6mu2v3x2qvudlkvhj89s58u3qwu5cerqfam9kdmtyd64y68p0mwclrmpume3gz47nkyjnj6c30elz3x4fv926qn3ulz8kmnwkxu4yg08v2as86yukzgfvgq8fxjchy2lkzrtr9jdyp5ymk7c7wn69jgcays3t3x5dlswmuphr4fqctj96zgftuqs0v95744h2h7gwdpn2nmtz26gtrsq3dcwp7l2qpldkcg64zx5k5g37zq4fspn2xesvmftvd2cwcgf93l0dcmwyz7zkfymdq6a6fyp2u738hx92cc6k4kejn5zcqgslw60g6ejueg8kyn4feycklg4v7utfsd5x3f8pc63xnj2la9wzlgn9992j3spq4c6l4s9s594gfzrps46pakwwspcx2njleu8xm9ys059f9zwfma0je40qlj8czsgx0pqkyfhxewclphty82q5s7rsyvya39a753eez5y85s9arn8vrftfsdzpvz44guus2qxzzl8wuk8fw0ykmj7vyq4wqzy5uwvxaywxf3f94jeh38lm66tvrzc842zx3p59x9dxmmt78prqftngjn6f5v2kvcphc6nspv8nfa5xcvpw9apft2583qux0tnvfwht8tkagymv2z84pccm8mdke9d9pw0ymhp9pnnqeyndwp8hzyjdcfr2phwxktawn5umav8zyw3v9wcsgaq9c36l52wd4s3uf3jsxh2dukw6vqh2t5ww9crl2mvv2zsua7q5v35l4mpkzn45ps9w6mewfd0q6ar0fhfd0eevvseyel5n8az3s5xnv627u2ggq4jkw75mzg5wxpadzg32668ts04xd9n92g6ct3ewkfwku80fevy7ypj6qxddn6fanztvngw499syynu9d6ak3070uq7wg3frc3c7jphz49vxfhe4fh2ggkfjsup2reveyvwcqp9j9nzfj6gysmc3tu8wux35p2tvd6mysu2sleslrds7zyewj9kj4qzqvy4juj0yn0pvhljfxr92acus8ztzvfsv5ekx92rywzqhtg9rav074esg9rqzsenpzjv0r87slhczwrkdt22gka0w4hnrj27rpp0rmw2z7dgnz6ly2p0fqh845ej4jujkk86kz4pcdld73rez2crqe65gc8437l4kt40v2e9lxe8raqxvr5wx9m44jpc5nr4ydhh7mtv0aqkx3e7w96jep2l63ez3wecaja2g47z7f9dyd6hpgfsejx25y3mpfsx4uncmmm5uvg9dhyy0lad2wfg2ju6jrqa5d5k6zgvcmy7l8pfasfj7yt0z5qqap5yvc4av4vhjq86ff6sfqj5x0lxzug5ca08yua72pgjgx49y0ftq63u3v53wmy2t9jg77sfwjvzcka5ur6z922gua6g323dtxggwkkqq7z6uu9mpkrjre2nd0lw04x4gt4gcn4llm4wh6ksvu7nx4erttv47fgzcw9sdxx0c6ll9pf0ntae5clp3qclwg4uhvd02lenv0mard9lmtalss2sg8d4ay78u4cgem02swh3pq5"
+-		var recipient *age.HybridRecipient
+-		recipient, err = age.ParseHybridRecipient(reportEncryptionRecipient)
+-		if err != nil {
+-			return err
+-		}
+-		encryptedWriter, err = age.Encrypt(destinationFile, recipient)
+-		if err != nil {
+-			return err
+-		}
+-		archiveWriter = encryptedWriter
+-	}
+ 
+ 	zipWriter := zip.NewWriter(archiveWriter)
+ 
+diff --git a/experimental/libbox/native_shell_session.go b/experimental/libbox/native_shell_session.go
+index d9bd5d2..b1cd873 100644
+--- a/experimental/libbox/native_shell_session.go
++++ b/experimental/libbox/native_shell_session.go
+@@ -1,5 +1,18 @@
+-//go:build linux || android || darwin || ios
++//go:build linux || android
+ 
++// Modified on 2026-09-23 and 2026-11-14 by Two Dice Ltd for the Morke VPN client.
++//
++// Changes from sing-box v1.14.4: the build constraint excludes both Apple platforms. Upstream
++// builds this file on `linux || android || darwin || ios`, which links protocol/tailscale/tailssh —
++// and through it the Tailscale client, its SSH server and wireguard-go — into every Apple build
++// whatever the `with_tailscale` tag says. OpenNativeShellSession / OpenNativePipeSession are called
++// only by a host app that runs a shell server; the Morke tunnel (the iOS Network Extension and the
++// macOS system extension alike) never calls them, so on both they now resolve to
++// native_shell_session_stub.go. iOS was excluded on 2026-09-23 (v1.14.1), macOS on 2026-11-14
++// (v1.14.4).
++//
++// This file is part of a modified copy of sing-box and remains under the GNU General Public
++// License version 3 or (at your option) any later version.
+ package libbox
+ 
+ import (
+diff --git a/experimental/libbox/native_shell_session_stub.go b/experimental/libbox/native_shell_session_stub.go
+index 8544efa..44ea427 100644
+--- a/experimental/libbox/native_shell_session_stub.go
++++ b/experimental/libbox/native_shell_session_stub.go
+@@ -1,5 +1,13 @@
+-//go:build !linux && !android && !darwin && !ios
++//go:build !linux && !android
+ 
++// Modified on 2026-09-23 and 2026-11-14 by Two Dice Ltd for the Morke VPN client.
++//
++// Changes from sing-box v1.14.4: the build constraint is the exact complement of
++// native_shell_session.go's, so iOS (since 2026-09-23) and macOS (since 2026-11-14) build this stub
++// (see that file).
++//
++// This file is part of a modified copy of sing-box and remains under the GNU General Public
++// License version 3 or (at your option) any later version.
+ package libbox
+ 
+ import (
+diff --git a/experimental/libbox/oom_report.go b/experimental/libbox/oom_report.go
+index d7bfcf5..bd76ee9 100644
+--- a/experimental/libbox/oom_report.go
++++ b/experimental/libbox/oom_report.go
+@@ -1,5 +1,18 @@
+ //go:build darwin || linux || windows
+ 
++// Modified on 2026-09-23 and 2026-11-14 by Two Dice Ltd for the Morke VPN client.
++//
++// Changes from sing-box v1.14.4 (first made on v1.14.1; carried to v1.14.4 on 2026-11-14):
++// OOMRecorderOptions no longer writes a log file or a
++// `connections.json` into an OOM report. v1.14 added both to every pressure / reset snapshot: the
++// saved log and a list of every open and recently closed connection with its source, destination
++// and domain, written into the working directory. That is a traffic log on disk, which the Morke
++// client forbids outright; v1.13.13's OOM report carried neither. The memory timeline, the heap
++// profiles and the runtime summary are unchanged.
++//
++// This file is part of a modified copy of sing-box and remains under the GNU General Public
++// License version 3 or (at your option) any later version.
++
+ package libbox
+ 
+ import (
+@@ -59,9 +72,6 @@ func OOMRecorderOptions(startedService *daemon.StartedService) oomkiller.Recorde
+ 			return metadata
+ 		},
+ 		OwnerCallback: chownReport,
+-		LogCallback: func() []byte {
+-			return formatLogEntries(startedService.SavedLog())
+-		},
+ 		SnapshotCallback: func(directory string, prefix string) {
+ 			for _, name := range oomReportProfiles {
+ 				writeOOMProfile(filepath.Join(directory, prefix+"."+name+".pb"), name)
+@@ -72,10 +82,6 @@ func OOMRecorderOptions(startedService *daemon.StartedService) oomkiller.Recorde
+ 				chownReport(runtimeInfoPath)
+ 			}
+ 			copyConfigSnapshot(directory)
+-			content := oomConnectionsContent(startedService)
+-			if content != nil {
+-				writeReportFile(directory, prefix+".connections.json", content)
+-			}
+ 		},
+ 	}
+ }
+diff --git a/include/registry.go b/include/registry.go
+index 9bb9220..650ac2c 100644
+--- a/include/registry.go
++++ b/include/registry.go
+@@ -1,48 +1,37 @@
++// Modified on 2026-09-23 and 2026-11-14 by Two Dice Ltd for the Morke VPN client.
++//
++// Changes from sing-box v1.14.4 (first made on v1.14.1; carried to v1.14.4 on 2026-11-14):
 +//   - InboundRegistry: only `tun` is registered.
 +//   - OutboundRegistry: only `direct`, `block` and `vless` are registered.
-+//   - ServiceRegistry: `ssm-api` is no longer registered.
++//   - ServiceRegistry: `api` and `ssm-api` are no longer registered.
 +//   - CertificateProviderRegistry: `cloudflare-origin-ca` is no longer registered.
 +//   - registerStubForRemovedInbounds / registerStubForRemovedOutbounds removed with their callers.
 +//
@@ -157,6 +392,7 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/include/r
 -	"github.com/sagernet/sing-box/option"
 -	"github.com/sagernet/sing-box/protocol/anytls"
  	"github.com/sagernet/sing-box/protocol/block"
+-	"github.com/sagernet/sing-box/protocol/bridge"
  	"github.com/sagernet/sing-box/protocol/direct"
 -	"github.com/sagernet/sing-box/protocol/group"
 -	"github.com/sagernet/sing-box/protocol/http"
@@ -165,6 +401,7 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/include/r
 -	"github.com/sagernet/sing-box/protocol/redirect"
 -	"github.com/sagernet/sing-box/protocol/shadowsocks"
 -	"github.com/sagernet/sing-box/protocol/shadowtls"
+-	"github.com/sagernet/sing-box/protocol/snell"
 -	"github.com/sagernet/sing-box/protocol/socks"
 -	"github.com/sagernet/sing-box/protocol/ssh"
 -	"github.com/sagernet/sing-box/protocol/tor"
@@ -172,6 +409,7 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/include/r
  	"github.com/sagernet/sing-box/protocol/tun"
  	"github.com/sagernet/sing-box/protocol/vless"
 -	"github.com/sagernet/sing-box/protocol/vmess"
+-	"github.com/sagernet/sing-box/service/api"
 -	originca "github.com/sagernet/sing-box/service/origin_ca"
  	"github.com/sagernet/sing-box/service/resolved"
 -	"github.com/sagernet/sing-box/service/ssmapi"
@@ -179,50 +417,53 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/include/r
  )
  
  func Context(ctx context.Context) context.Context {
-@@ -49,26 +41,16 @@
+@@ -52,27 +41,16 @@ func Context(ctx context.Context) context.Context {
  func InboundRegistry() *inbound.Registry {
  	registry := inbound.NewRegistry()
  
 +	// Morke: `tun` is the ONLY ingress this client accepts. SingBoxConfigValidator invariant (d)
 +	// refuses every other inbound type, because each of them binds a listening socket inside the
-+	// Network Extension. Every other RegisterInbound call upstream makes is deleted here, so an
-+	// unexpected inbound type now fails to decode ("unknown inbound type") instead of being
-+	// constructed. The `registerQUIC*` / `registerCloudflared*` calls below resolve to upstream's
-+	// own not-included stubs, which register an error-returning constructor.
++	// Network Extension. Every other RegisterInbound call upstream makes is deleted here — snell,
++	// new in v1.14, included — so an unexpected inbound type now fails to decode ("unknown inbound
++	// type") instead of being constructed. The `registerQUIC*` / `registerCloudflared*` calls below
++	// resolve to upstream's own not-included stubs, which register an error-returning constructor.
  	tun.RegisterInbound(registry)
 -	redirect.RegisterRedirect(registry)
 -	redirect.RegisterTProxy(registry)
 -	direct.RegisterInbound(registry)
- 
+-
 -	socks.RegisterInbound(registry)
 -	http.RegisterInbound(registry)
 -	mixed.RegisterInbound(registry)
 -
 -	shadowsocks.RegisterInbound(registry)
+-	snell.RegisterInbound(registry)
 -	vmess.RegisterInbound(registry)
 -	trojan.RegisterInbound(registry)
 -	naive.RegisterInbound(registry)
 -	shadowtls.RegisterInbound(registry)
 -	vless.RegisterInbound(registry)
 -	anytls.RegisterInbound(registry)
--
+ 
  	registerQUICInbounds(registry)
  	registerCloudflaredInbound(registry)
 -	registerStubForRemovedInbounds(registry)
  
  	return registry
  }
-@@ -76,27 +58,18 @@
+@@ -80,29 +58,19 @@ func InboundRegistry() *inbound.Registry {
  func OutboundRegistry() *outbound.Registry {
  	registry := outbound.NewRegistry()
  
 +	// Morke: the egress allow-set is exactly SingBoxConfigValidator.allowedOutboundTypes minus
-+	// `dns`, which upstream v1.13.13 does not register as an outbound at all (protocol/dns is a
-+	// helper for the `hijack-dns` route action; see route/dns.go). `vless` is the proxy egress that
++	// `dns`, which upstream does not register as an outbound at all (protocol/dns is a helper for
++	// the `hijack-dns` route action; see route/dns.go). `vless` is the proxy egress that
 +	// route.final must resolve to; `direct` is added by the split-tunnel merge and sometimes sent by
-+	// the server; `block` is a sink. selector / urltest and every other protocol upstream registers
-+	// are deleted: the validator refuses them, so they were unreachable code in a shipped build.
++	// the server; `block` is a sink. selector / urltest, the v1.14 `bridge` and `snell` outbounds
++	// and every other protocol upstream registers are deleted: the validator refuses them, so they
++	// were unreachable code in a shipped build.
  	direct.RegisterOutbound(registry)
+-	bridge.RegisterOutbound(registry)
 -
  	block.RegisterOutbound(registry)
 -
@@ -232,6 +473,7 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/include/r
 -	socks.RegisterOutbound(registry)
 -	http.RegisterOutbound(registry)
 -	shadowsocks.RegisterOutbound(registry)
+-	snell.RegisterOutbound(registry)
 -	vmess.RegisterOutbound(registry)
 -	trojan.RegisterOutbound(registry)
 -	registerNaiveOutbound(registry)
@@ -247,28 +489,32 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/include/r
  
  	return registry
  }
-@@ -133,8 +106,11 @@
+@@ -143,9 +111,13 @@ func DNSTransportRegistry() *dns.TransportRegistry {
  func ServiceRegistry() *service.Registry {
  	registry := service.NewRegistry()
  
-+	// Morke: `ssm-api` deleted — a Shadowsocks server-management HTTP listener, in the same
-+	// class as clash_api. /auth/config never emits a `services` array (api.md §POST
-+	// /api/v1/auth/config), so it was unreachable. `resolved` stays: dns/transport/local
-+	// and the DNS registry below already link service/resolved.
+-	api.RegisterService(registry)
++	// Morke: `api` (the v1.14 gRPC control service, a listener that can also download and serve
++	// a web dashboard) and `ssm-api` (a Shadowsocks server-management HTTP listener) deleted — the
++	// same class as clash_api. SingBoxConfigValidator invariant (g) refuses a top-level `services`
++	// key, and /auth/config never emits one, so both were unreachable. `resolved` stays:
++	// dns/transport/local and the DNS registry below already link service/resolved. The OOM killer
++	// stays: libbox's daemon injects it itself whenever the host enables it (daemon/instance.go).
  	resolved.RegisterService(registry)
 -	ssmapi.RegisterService(registry)
  
  	registerQUICServices(registry)
  	registerDERPService(registry)
-@@ -150,22 +126,7 @@
+@@ -162,22 +134,8 @@ func CertificateProviderRegistry() *certificate.Registry {
  
  	registerACMECertificateProvider(registry)
  	registerTailscaleCertificateProvider(registry)
 -	originca.RegisterCertificateProvider(registry)
-+	// Morke: `cloudflare-origin-ca` deleted — /auth/config never emits a `certificate` block.
++	// Morke: `cloudflare-origin-ca` deleted — invariant (g) refuses `certificate_providers`, and
++	// /auth/config never emits one.
  
  	return registry
--}
+ }
 -
 -func registerStubForRemovedInbounds(registry *inbound.Registry) {
 -	inbound.Register[option.ShadowsocksInboundOptions](registry, C.TypeShadowsocksR, func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.ShadowsocksInboundOptions) (adapter.Inbound, error) {
@@ -283,4 +529,40 @@ diff -ruN -x .git -x build -x Libbox.xcframework -x .DS_Store sing-box/include/r
 -	outbound.Register[option.StubOptions](registry, C.TypeWireGuard, func(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.StubOptions) (adapter.Outbound, error) {
 -		return nil, E.New("WireGuard outbound is deprecated in sing-box 1.11.0 and removed in sing-box 1.13.0, use WireGuard endpoint instead")
 -	})
- }
+-}
+diff --git a/service/powerreport/device_darwin.m b/service/powerreport/device_darwin.m
+index 4a8d5ef..e3fcbd8 100644
+--- a/service/powerreport/device_darwin.m
++++ b/service/powerreport/device_darwin.m
+@@ -1,3 +1,16 @@
++// Modified on 2026-11-14 by Two Dice Ltd for the Morke VPN client.
++//
++// Changes from sing-box v1.14.4: the load-time constructor boxPowerInitBatteryMonitoring is removed.
++// On iOS it ran at image load, whatever the host's powerReportEnabled says, and dispatched to the
++// main queue to set UIDevice.currentDevice.batteryMonitoringEnabled = YES for the life of the
++// process. The battery state is read only by boxPowerSource, which only the power-report recorder
++// calls while sampling, and the Morke tunnel never enables the power report. Without the constructor
++// boxPowerSource reads an unmonitored device (UIDeviceBatteryStateUnknown, level -1 → source 0,
++// level 0) — the answer it already gives on platforms without a battery.
++//
++// This file is part of a modified copy of sing-box and remains under the GNU General Public
++// License version 3 or (at your option) any later version.
++
+ #import <Foundation/Foundation.h>
+ #import <TargetConditionals.h>
+ 
+@@ -26,14 +39,6 @@ int boxPowerThermalState(void) {
+ 
+ #if TARGET_OS_IOS
+ 
+-__attribute__((constructor)) static void boxPowerInitBatteryMonitoring(void) {
+-	dispatch_async(dispatch_get_main_queue(), ^{
+-		@autoreleasepool {
+-			[UIDevice currentDevice].batteryMonitoringEnabled = YES;
+-		}
+-	});
+-}
+-
+ int boxPowerSource(int *level) {
+ 	@autoreleasepool {
+ 		*level = 0;

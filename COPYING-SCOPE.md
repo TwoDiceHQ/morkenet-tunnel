@@ -42,9 +42,10 @@ trimmed sing-box, not upstream's build, so the Corresponding Source is our
 modified tree rather than the tag. `singbox-fork/0001-morke-trim.patch` is that
 modification, and it is a derivative of sing-box: it carries sing-box's own
 licence, GPL-3.0-or-later, exactly as the code it patches does. GPLv3 § 5(a)
-requires us to state that the work is modified and to date it — that date is
-**2026-09-04**, and every file the patch touches carries the notice in its own
-header. See [`README.md`](README.md) and [`BUILD.md`](BUILD.md) § 1.
+requires us to state that the work is modified and to date it — the current
+patch, against `v1.14.4`, is dated **2026-09-23**, **2026-10-04** and **2026-11-14**, and every
+file it touches carries the notice in its own header. See [`README.md`](README.md) and
+[`BUILD.md`](BUILD.md) § 1.
 
 Copyright (C) 2026 Two Dice Ltd, for the files in this repository.
 Copyright (C) 2022 by nekohasekai `<contact-sagernet@sekai.icu>`, and the other
@@ -58,7 +59,7 @@ It does not reach anything outside this repository. In particular it does **not*
 place under the GPL, and must not be read as placing under the GPL:
 
 * the Morke iOS and macOS client applications and their app targets;
-* the `MorkeFeatures`, `MorkeServices`, `MorkeModels`, `MorkeGlobe`,
+* the `MorkeFeatures`, `MorkeServices`, `MorkeModels`,
   `MorkeDesignSystem` and `PlatformKit` modules;
 * the Morke backend service, its API and its configuration;
 * the Morke name, logo, icons, artwork and other brand assets, which are

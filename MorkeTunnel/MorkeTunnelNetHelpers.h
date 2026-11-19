@@ -24,9 +24,6 @@
 // code: README.md and BUILD.md in the repository this file is published from.
 
 //
-//  MorkeTunnelNetHelpers.h
-//  MorkeTunnel
-//
 //  Pure C helpers extracted from ExtensionPlatformInterface.m so the trickiest
 //  bit / ABI math can be unit-tested off-device (the Network Extension itself
 //  never runs in the Simulator — see T-TEST-UNIT-12). Foundation / libbox-free
@@ -83,6 +80,24 @@ int morke_ipv6_netmask_prefix(const struct sockaddr *netmask);
 // Returns false for NULL / non-AF_INET6 input / a sockaddr too short to hold
 // sin6_addr[0..1] (sa_len < 10).
 bool morke_ipv6_is_link_local(const struct sockaddr *addr);
+
+// ── P9g: the tunnel's half of the analytics (T-DESIGN-24) ──────────────────────
+// Called from TunnelAnalytics.swift; covered by MorkeTunnelTests' TunnelAnalyticsHelpersTests.
+// Both pure.
+
+// Bytes moved between two readings of one of the engine's running totals
+// (libbox's uplinkTotal / downlinkTotal, since P9gb). A reading BELOW the
+// previous one is a total that restarted — a new engine starts from zero — so
+// the bytes are the new reading, never current - previous modulo 2^64, which
+// would invent ~16 EiB.
+uint64_t morke_counter_delta(uint64_t previous, uint64_t current);
+
+// Whether a stop is a Kill Switch block: includeAllNetworks on, and a stop
+// reason that means the tunnel FAILED under the user — so the OS held their
+// traffic — rather than one the user, the configuration, an app update, a
+// higher-priority VPN or sleep asked for. `stop_reason` is the
+// NEProviderStopReason raw value; an unknown value is not a block.
+bool morke_stop_is_kill_switch_block(bool include_all_networks, long stop_reason);
 
 #ifdef __cplusplus
 }

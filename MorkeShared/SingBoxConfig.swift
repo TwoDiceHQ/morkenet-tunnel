@@ -40,8 +40,9 @@
 
 import Foundation
 
-// Opaque wrapper for the sing-box configuration bytes (JSON).
-// Received verbatim from POST /api/v1/auth/config and passed to libbox as-is.
+// Opaque wrapper for the sing-box configuration bytes (JSON), received from POST /api/v1/auth/config.
+// Not always passed to libbox as received: the app may rewrite it before storing (SingBoxConfigMerge,
+// SingBoxKillSwitchStack), and the tunnel's one retry strips the Smart merge (SingBoxConfigStrip).
 //
 // Lives in MorkeShared (architecture-audit §7.3, step 3): one config newtype shared by both
 // sides — the app builds it, the NE receives its `.raw` blob across the wire. MorkeModels

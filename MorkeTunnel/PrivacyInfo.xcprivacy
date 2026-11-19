@@ -6,17 +6,30 @@
 	     Separate from the app's (Config/PrivacyInfo.xcprivacy) because a manifest describes
 	     the bundle it ships in, and this bundle links different code.
 
-	     All three categories below come from Frameworks/Libbox.xcframework, not from our
+	     Both categories below come from Frameworks/Libbox.xcframework, not from our
 	     Swift/C/ObjC — which contains none of these APIs. The shipping ios-arm64 slice is a
 	     STATIC archive ("current ar archive") carrying no manifest of its own, so libbox's
-	     symbols become this bundle's to declare. Measured on the LINKED Release arm64
-	     appex binary 2026-08-31: _stat _fstat _fstatat _lstat _statfs _statvfs
-	     _mach_absolute_time all survive linking (nothing is dead-stripped), and there is no
-	     getattrlist-family symbol and no UserDefaults reference — so those categories are
-	     deliberately NOT declared here.
+	     symbols become this bundle's to declare.
+	     Re-measured 2026-11-14 (T-ARCH-43, engine v1.14.4-morke.1), after 2026-09-23 (T-REL-14(b),
+	     v1.14.1-morke.1), both times on the LINKED Release
+	     arm64 appex from an ARCHIVE (`xcodebuild archive … CODE_SIGNING_ALLOWED=NO
+	     LD_GENERATE_MAP_FILE=YES`), read from its link map and `nm -u`: _stat _fstat _fstatat
+	     _lstat _mach_absolute_time are imported, and nothing else on Apple's required-reason
+	     list is — no statfs / statvfs / fstatfs / fstatvfs, no getattrlist family, no
+	     NSFileSystem*/volume-capacity key, no UserDefaults, no activeInputModes, no systemUptime.
+	     So FileTimestamp and SystemBootTime are declared and nothing else. The DiskSpace entry
+	     this file carried since 2026-08-31 was measured on the untrimmed engine; its symbols left
+	     with the T-ARCH-31 trim and are absent from the v1.13.13 archive as well.
+	     v1.14 imports six symbols v1.13.13 did not — _mach_continuous_time _proc_pid_rusage
+	     _sysctlbyname _notify_register_check _notify_check _notify_cancel — and none is on
+	     Apple's list (bundleresources/…/nsprivacyaccessedapitype, read 2026-09-23), so none
+	     adds a category. v1.14.4 changes the imports again (+ _dispatch_async __dispatch_main_q
+	     _if_indextoname _notify_register_file_descriptor, the NSProcessInfo / NSThread / UIDevice
+	     classes of sing-box's power report; − _notify_check _notify_register_check) and none of
+	     those is on the list either, so the two categories below stand unchanged.
 
-	     This file is a bundle RESOURCE, not a linked dependency: MorkeTunnel still links only
-	     MorkeShared, and the NE memory budget is untouched. -->
+	     This file is a bundle RESOURCE, not a linked dependency: it adds nothing to what MorkeTunnel
+	     links (MorkeShared and WidgetKit, T-EXT-1), and the NE memory budget is untouched. -->
 
 	<key>NSPrivacyTracking</key>
 	<false/>
@@ -27,7 +40,8 @@
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array>
 		<dict>
-			<!-- _stat _fstat _fstatat _lstat, from libbox.
+			<!-- _stat _fstat _fstatat _lstat, from libbox — all four imported by the v1.14.1
+			     archive (2026-09-23) and by the v1.14.4 archive (2026-11-14).
 			     C617.1 is "metadata of files inside the app container, app group container, or
 			     the app's CloudKit container". SingBoxTunnel.start puts every path libbox
 			     touches inside the App Group container: basePath = container,
@@ -44,38 +58,17 @@
 			</array>
 		</dict>
 		<dict>
-			<!-- _statfs _statvfs, from libbox. The callers in the linked binary are
-			     base::SysInfo::AmountOfFreeDiskSpace / AmountOfTotalDiskSpace (the vendored
-			     tracing library, checking free space before writing trace files) and
-			     sftp.getStatVFSForPath / StatVFS.FreeSpace (a vendored SFTP library's protocol
-			     handler), reached through Go's syscall.Statfs. E174.1 is "check whether there is
-			     sufficient disk space to write files" — that is what the reachable code does with
-			     the API. Its off-device clause holds absolutely here: nothing derived from disk
-			     space is logged, surfaced or sent anywhere.
-			     NOT 85F4.1 (disk space is never displayed), NOT 7D9E.1 (no bug-report path),
-			     NOT B728.1 (not a health-research app).
-			     ⚠️ Maintainer: E174.1 also carries "the app must behave differently based on disk
-			     space in a way that is observable to users". Morke does not — these are dormant
-			     library paths we neither call nor can strip from a vendored static archive. The
-			     first clause matches the code's purpose and no other DiskSpace reason fits at
-			     all; leaving the category undeclared would instead trip ITMS-91053, since the
-			     symbols are provably in the shipping binary. Flagged rather than settled. -->
-			<key>NSPrivacyAccessedAPIType</key>
-			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
-			<key>NSPrivacyAccessedAPITypeReasons</key>
-			<array>
-				<string>E174.1</string>
-			</array>
-		</dict>
-		<dict>
-			<!-- _mach_absolute_time, from libbox: Go's monotonic clock (runtime.nanotime, backing
-			     timers, deadlines and time.Since) plus the vendored tracing library's clock.
+			<!-- _mach_absolute_time, from libbox (imported by the v1.14.1 archive, 2026-09-23, and
+			     the v1.14.4 archive, 2026-11-14):
+			     Go's monotonic clock (runtime.nanotime, backing timers, deadlines and
+			     time.Since) plus the vendored tracing library's clock.
 			     35F9.1 is "measure the amount of time that has elapsed between events that
 			     occurred within the app or to perform calculations to enable timers" — exactly
 			     what a monotonic clock is used for here. Its "may not be sent off-device" clause
 			     is satisfied by the project's privacy posture: no per-user analytics, no
 			     behavioural tracking, no remote crash reporter, and the operational-health
-			     metrics are in-memory + os_log with zero network egress.
+			     metrics are os_log plus the on-device AnalyticsLedger files in the App Group
+			     container (P9g; in the device backup) with zero network egress.
 			     NOT 8FFB.1 (no absolute event timestamps are calculated or sent off-device),
 			     NOT 3D61.1 (no user-submitted bug report carries boot time). -->
 			<key>NSPrivacyAccessedAPIType</key>
@@ -91,8 +84,8 @@
 	     (read from the ASC web console 2026-08-31) names Purchase History / User ID / Device ID —
 	     all three are collected by the APP, whose manifest declares them. This extension collects
 	     none of them: it makes no control-plane call at all. MorkeTunnel/ contains no URLSession
-	     and no API base URL, and MorkeShared — the only module it links — contains no URLSession
-	     either; the sing-box config reaches it through the shared Keychain, written by the app,
+	     and no API base URL, and neither module it links (MorkeShared, WidgetKit for one
+	     reloadTimelines) is used for a fetch: MorkeShared contains no URLSession either; the sing-box config reaches it through the shared Keychain, written by the app,
 	     "never by a fetch from the extension" (T-CFG-41). Apple aggregates the bundles' manifests
 	     into one Privacy Report, so declaring the app's three types here as well would over-state
 	     what the tunnel does. -->

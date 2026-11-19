@@ -59,8 +59,9 @@ public enum SharedKeychain {
     // MARK: - Shared keychain identity (single source of truth for both targets)
 
     // `nonisolated` throughout: the extension reads these off the main actor (loadActivationKey is
-    // nonisolated), and the project defaults type-level declarations to @MainActor isolation. All are
-    // immutable Sendable values, so opting out of actor isolation is safe and required here.
+    // nonisolated). The package compiles MorkeShared nonisolated by default (only MorkeFeatures opts
+    // into MainActor, Package.swift), so the keyword states that rather than being required. All are
+    // immutable Sendable values, so opting out of actor isolation is safe.
 
     // Keychain service shared by the app and the extension.
     public nonisolated static let service = "tech.morke"
@@ -100,6 +101,14 @@ public enum SharedKeychain {
     // / definitive 401.
     public nonisolated static let deviceCredentialAccount = "device_credential"
 
+    // Account under `service` that marks the device credential as one that has NEVER ridden in a
+    // login (T-MAC-24): a Mac's anonymous Home enrolls it before any account exists, and Create
+    // Account keeps such a credential instead of spending a second `/enroll`. Presence is the whole
+    // signal, the value a placeholder, so it is no secret; it describes the credential, so it lives
+    // here beside it (credentials and what describes them stay in the Keychain, never UserDefaults)
+    // and is deleted with it. Written on macOS only, app-only like the credential itself.
+    public nonisolated static let deviceCredentialAnonymousAccount = "device_credential_anonymous"
+
     // Accessibility class for EVERY item under this identity — one constant so no two write paths can
     // drift apart. `AfterFirstUnlockThisDeviceOnly` is what makes the items readable by the extension on
     // an on-demand raise after the first unlock, while staying non-exportable (no iCloud, no backup,
@@ -111,7 +120,15 @@ public enum SharedKeychain {
     public nonisolated static let accessibility: String = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String
 
     // Suffix the access group always ends with (the "tech.morke" namespace, NOT the bundle id).
+    // P75: the Mac Debug build ("Morke Dev") keeps its key, credential and config in its own group,
+    // the MORKE_KEYCHAIN_GROUP build setting its entitlements sign. Both the runtime derivation and the
+    // fallback below end with this suffix, so a Dev build can never land on the Release group. Same
+    // compile-time switch as AppGroup.appGroupID; iOS always reads the Release suffix.
+    #if os(macOS) && DEBUG
+    private nonisolated static let accessGroupSuffix = "tech.morke.dev.shared"
+    #else
     private nonisolated static let accessGroupSuffix = "tech.morke.shared"
+    #endif
 
     // Hand-resolved fallback ($(AppIdentifierPrefix) = "VM3XX8889Q."). Used ONLY if the runtime
     // probe below fails (e.g. keychain locked before first unlock in the extension) — keeping the
@@ -128,12 +145,14 @@ public enum SharedKeychain {
 
     // Opt every SecItem query into the data-protection keychain on macOS. Scoped to macOS so iOS stays
     // byte-identical: on iOS the data-protection keychain is the ONLY keychain (this flag is already the
-    // default), whereas macOS defaults to the legacy file-based keychain. The sandboxed MorkeTunnel
-    // sysext can only share the activation key with the app via `keychain-access-groups` on the
-    // data-protection keychain — the file-based macOS keychain does not honour access groups the same
-    // way, so the sysext's read returns errSecItemNotFound → "activation key absent from Keychain" and
-    // the tunnel can't authenticate. It also makes kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly's
-    // non-exportable / no-iCloud-or-backup guarantee hold on macOS, not just iOS (fable-5 audit #1).
+    // default), whereas macOS defaults to the legacy file-based keychain. On the Mac only the APP reads
+    // and writes these items: the MorkeTunnel system extension runs as root outside any user context, so
+    // it reaches neither this keychain nor the login one (TN3137: a system-context search list is "just
+    // the System keychain"), and it makes no SecItem call at all — its gate is a providerConfiguration
+    // flag (T-MAC-14) and its config a root-only cache of its own (T-MAC-26). This flag makes
+    // kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly's non-exportable / no-iCloud-or-backup guarantee
+    // hold on macOS, not just iOS (fable-5 audit #1). (Corrected by T-MAC-26: this note used to say the
+    // sysext shares the activation key with the app here, which no Mac start has ever done.)
     public nonisolated static func dataProtected(_ query: [String: Any]) -> [String: Any] {
         #if os(macOS)
         var q = query
@@ -189,22 +208,14 @@ public enum SharedKeychain {
 
     // MARK: - Read
 
-    // T-ARCH-24: THE generic-password read for this Keychain identity — the only SecItem read
-    // implementation in the repo. Both callers route through it: loadActivationKey below (compiled
-    // into the extension, which reads the key cross-target) and MorkeServices' GenericKeychainItem
-    // .load (app-side, for the attest keyId / device credential). They used to be hand-mirrored
-    // copies of the same query, and a divergence across that app↔NE wall produces NO compile error
-    // — it surfaces only as SecItemCopyMatching → errSecItemNotFound → TunnelStartError
-    // .notAuthorized at tunnel start, exactly the failure mode this file's header warns about.
-    // Parameterised rather than moved: no app-side code enters MorkeShared, so the extension's link
-    // set is unchanged.
+    // The string front door over loadData below: the same query, plus the UTF-8 decode. Callers:
+    // loadActivationKey below (compiled into the extension, which reads the key cross-target) and
+    // MorkeServices' GenericKeychainItem.load (app-side: the attest keyId, the device credential, the
+    // acknowledgement). Parameterised rather than moved: no app-side code enters MorkeShared, so the
+    // extension's link set is unchanged.
     //
     // Returns nil when the item does not exist; throws SharedKeychainError.unexpectedStatus for
     // Security-framework failures.
-    //
-    // T-CFG-41: the byte-level read moved down into loadData below, so the sing-box config (Data, not a
-    // UTF-8 string) does not introduce a SECOND SecItem read implementation — the exact drift this
-    // header warns about. This stays the string front door: same query, plus the UTF-8 decode.
     public nonisolated static func loadString(
         service: String,
         account: String,
@@ -220,7 +231,10 @@ public enum SharedKeychain {
     }
 
     // T-ARCH-24 / T-CFG-41: THE generic-password read for this Keychain identity — every read in the
-    // repo, string or Data, app-side or extension-side, bottoms out here.
+    // repo, string or Data, app-side or extension-side, bottoms out here. One implementation because a
+    // divergence across the app↔NE wall produces NO compile error — it surfaces only as
+    // SecItemCopyMatching → errSecItemNotFound → TunnelStartError.notAuthorized at tunnel start, exactly
+    // the failure mode this file's header warns about.
     //
     // Returns nil when the item does not exist; throws SharedKeychainError.unexpectedStatus for
     // Security-framework failures. The nil/throw split is load-bearing for both callers: "absent" is a
@@ -264,11 +278,14 @@ public enum SharedKeychain {
     // MARK: - Sing-box tunnel config (T-CFG-41, iOS only)
 
     // iOS ONLY — AND NOT BY PREFERENCE. On macOS the tunnel is a SYSTEM EXTENSION that runs sandboxed
-    // and AS ROOT, in the system context rather than the user session: SecItem there returns
-    // errSecNotAvailable, which is precisely why T-MAC-10 failed and why the macOS start-time gate is a
-    // providerConfiguration flag instead (T-MAC-14). On macOS the config therefore STAYS in
-    // providerConfiguration. Do not "finish" this move on the Mac — it would stop the tunnel starting
-    // at all. The #if is what keeps that from being a silent, runtime-only discovery.
+    // and AS ROOT, in the system context rather than the user session, where neither the user's
+    // data-protection keychain nor the login keychain is reachable (TN3137) — which is why T-MAC-10
+    // failed and why the macOS start-time gate is a providerConfiguration flag instead (T-MAC-14). On
+    // macOS the config travels in a provider message from the app into a 0600 cache in the
+    // extension's root-owned App-Group container (TunnelConfigCache, T-MAC-26/26b), never into
+    // providerConfiguration, whose store is world-readable (T-MAC-20). Do not "finish" this move on the
+    // Mac — a keychain the extension cannot reach would stop the tunnel starting at all. The #if is what
+    // keeps that from being a silent, runtime-only discovery.
     #if os(iOS)
 
     // Reads the stored sing-box config. nil when nothing is stored (a fresh install, an install upgraded

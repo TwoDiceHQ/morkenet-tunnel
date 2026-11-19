@@ -51,7 +51,14 @@ import Foundation
 // must match `bundleID` exactly.
 
 public nonisolated enum TunnelExtensionConstants {
+    // P75: the Mac Debug build ("Morke Dev") embeds its own system extension, so that its tunnel and
+    // the Release app's are two extensions, never one replacing the other. Same compile-time switch
+    // as AppGroup.appGroupID, for the same reason; iOS always reads the Release id.
+    #if os(macOS) && DEBUG
+    public static let bundleID = "tech.twodice.morke.dev.tunnel"
+    #else
     public static let bundleID = "tech.twodice.morke.tunnel"
+    #endif
     // iOS requires a non-nil serverAddress on NETunnelProviderProtocol.
     public static let serverAddressPlaceholder = "Morke VPN"
     // Shown in Settings → VPN on the device.

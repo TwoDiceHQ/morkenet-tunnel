@@ -11,14 +11,15 @@ GPL-3.0-or-later. Shipping that through the App Store is **conveying**, and GPLv
 terms to anyone who comes into possession of a copy. § 6 then requires us to
 offer the source. This is that offer, discharged by publication.
 
-**Pinned engine: sing-box `v1.13.13`, modified.** We do not ship upstream's build.
+**Pinned engine: sing-box `v1.14.4`, modified.** We do not ship upstream's build.
 The engine is trimmed to the protocols this client can actually reach, and the
-modification is published here as a 286-line patch against upstream commit
-`83b73048ff772b919af18653b78ffeaa2d48b66e` — see
+modification is published here as a 568-line patch over eleven files against
+upstream commit `c005f35300ce76427dc285481ec5695f5b179cd2` — see
 [`singbox-fork/`](singbox-fork/) and [BUILD.md § 1](BUILD.md). GPLv3 § 5(a)
-requires us to say that the work is modified and to date it; that date is
-**2026-09-04**, and every file the patch touches carries the notice in its own
-header.
+requires us to say that the work is modified and to date it; those dates are
+**2026-09-23**, **2026-10-04** and **2026-11-14**, and every file the patch touches carries the
+notice in its own header. (The engine was first modified on 2026-09-04, on top of `v1.13.13`; this
+patch replaces that one.)
 
 **Licence: GNU GPL v3 or later.** The text is [`LICENSE`](LICENSE), verbatim and
 unmodified. What it covers, what it deliberately does *not* reach, the one module
@@ -96,20 +97,23 @@ read at the pinned tag or at the linked module's own `LICENSE`:
 
 | Component | Licence | In the trimmed build? |
 |---|---|---|
-| `sagernet/sing-box`, `sing`, `sing-tun`, `sing-vmess`, `sing-mux` | GPL-3.0-or-later, plus a naming clause | linked |
-| `sagernet/sing-quic`, `sing-shadowsocks`, `cronet-go` | GPL-3.0-or-later, plus a naming clause | no longer linked |
-| `anytls/sing-anytls` | GPL-3.0-or-later | no longer linked |
+| `sagernet/sing-box`, `sing`, `sing-tun`, `sing-vmess`, `sing-mux`, `sing-snell` | GPL-3.0-or-later, plus a naming clause | linked |
+| `sagernet/sing-quic`, `sing-shadowsocks`, `sing-shadowsocks2`, `sing-shadowtls`, `cronet-go` | GPL-3.0-or-later, plus a naming clause | not linked |
+| `anytls/sing-anytls` | GPL-3.0-or-later | not linked |
 | `sagernet/gvisor` | Apache-2.0 | linked |
 | `sagernet/smux` | MIT | linked |
-| `sagernet/quic-go`, `sagernet/wireguard-go` | MIT | no longer linked |
+| `sagernet/quic-go`, `sagernet/wireguard-go` | MIT | not linked |
 | `metacubex/utls`, `sagernet/gomobile` | BSD-3-Clause | linked |
-| `sagernet/tailscale` | BSD-3-Clause | no longer linked (iOS); still linked in the macOS slice |
+| `sagernet/tailscale` | BSD-3-Clause | not linked (iOS since `v1.14.1-morke.1`, macOS since `v1.14.4-morke.1`) |
 
-The right-hand column is a fact about *this* build, recorded because the patch in
-`singbox-fork/` is what changed it. It is **not** a licence claim and nothing is
-being withdrawn: the notices for every component above stay reproduced here and
-in the application, because over-attribution costs a reader nothing and dropping
-a notice is the one direction § 4 does not forgive.
+The right-hand column is a fact about *this* build, measured on the `ios-arm64`
+and `macos-arm64_x86_64` slices as occurrences of each module's import path and as
+defined symbols: zero means the module is not in the binary. Since `v1.14.4-morke.1`
+the two slices link the same 40 modules. It is **not** a licence claim. The in-app
+list is generated from the same linked set (`singbox-fork/licences.py`), so a
+component marked *not linked* is not on it. Listing a notice for code that is not present costs a reader nothing;
+the error § 4 does not forgive is the opposite one, a linked component with no
+notice.
 
 The sing-box licence appends a term we reproduce because § 4 requires notices to
 be kept intact: *"no derivative work may use the name or imply association with
@@ -136,23 +140,31 @@ source tree proves what is in a downloaded `.ipa` is overstating it.
 
 What *can* be checked independently, and is worth more than a promise:
 
-1. **The libbox artefact, and this one is exact.** Clone tag `v1.13.13`, apply
+1. **The libbox artefact, and this one is exact.** Fetch commit
+   `c005f35300ce76427dc285481ec5695f5b179cd2` (tag `v1.14.4`), apply
    `singbox-fork/0001-morke-trim.patch`, build by the recipe in `BUILD.md § 2`,
    and run `singbox-fork/libbox-digest.py` over the result. It should print the
    digests in `BUILD.md § 2.3`, byte for byte. We have run that comparison across
-   two builds from different directories: the `Libbox` static libraries came out
-   **identical except for three bytes** — the ASCII timestamp `libtool` stamps
-   into the `ar` symbol-index header, which is what the digest script blanks. So
-   this is not a "should roughly match": the engine half of the GPL claim is
-   verifiable to the byte, without depending on anything we assert.
+   two builds from different directories with separate Go build caches: every
+   object member of the `Libbox` static libraries came out **identical**, and
+   the only differing bytes sat in each `ar` symbol index — the ASCII timestamp
+   `libtool` stamps into its header, and the alignment pad after its last symbol
+   name, which `libtool` leaves uninitialised. The digest script blanks the first
+   and zeroes the second (BUILD.md § 2.3 dates that correction). So this is not a "should roughly match": the engine half
+   of the GPL claim is verifiable to the byte, without depending on anything we
+   assert.
 
    Note that **building the upstream tag alone will not match**, and must not:
    we ship a modified engine, the patch is the modification, and a digest that
    matched upstream would mean the patch had not been applied.
-2. **The absence of a network client in the extension.** The shipped appex
-   contains no `URLSession` and no API base URL; it makes no control-plane call
-   at all. That is checkable on a decrypted binary with no source whatsoever, and
-   it is also recorded in `MorkeTunnel/PrivacyInfo.xcprivacy`.
+2. **The absence of a control-plane client in the extension.** The extension's
+   own code contains no `URLSession` and no API base URL, and the shipped appex
+   contains no API base URL either; it makes no control-plane call at all. The
+   binary **does** reference `NSURLSession`: sing-box's own HTTP client for
+   remote rule-sets includes an `NSURLSession`-based engine besides its default
+   Go one (`BUILD.md § 5`). Our earlier wording, "contains no `URLSession`", was
+   true of our source and not of the binary. The data position is recorded in
+   `MorkeTunnel/PrivacyInfo.xcprivacy`.
 
 ## A note on the Apple Team ID
 

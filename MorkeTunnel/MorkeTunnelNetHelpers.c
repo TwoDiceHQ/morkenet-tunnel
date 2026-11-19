@@ -24,13 +24,9 @@
 // code: README.md and BUILD.md in the repository this file is published from.
 
 //
-//  MorkeTunnelNetHelpers.c
-//  MorkeTunnel
-//
-//  See MorkeTunnelNetHelpers.h. The logic here is lifted verbatim from the
-//  inline helpers in ExtensionPlatformInterface.m and must stay byte-for-byte
-//  behaviour-identical to them — the .m calls into these instead of duplicating
-//  the routing / parse math.
+//  See MorkeTunnelNetHelpers.h. The logic here was lifted verbatim from inline
+//  helpers in ExtensionPlatformInterface.m, which now calls these; the inline
+//  copies no longer exist.
 //
 
 #include "MorkeTunnelNetHelpers.h"
@@ -113,4 +109,32 @@ bool morke_ipv6_is_link_local(const struct sockaddr *addr) {
     // Avoid including <netinet6/in6.h> (private module on the iOS SDK).
     const uint8_t *addrBytes = (const uint8_t *)addr + 8;
     return addrBytes[0] == 0xfe && (addrBytes[1] & 0xc0) == 0x80;
+}
+
+// ---------------------------------------------------------------------------
+// P9g — NOT lifted from ExtensionPlatformInterface.m like everything above:
+// new for the tunnel's analytics, and here so MorkeTunnelTests can reach them.
+
+uint64_t morke_counter_delta(uint64_t previous, uint64_t current) {
+    return current >= previous ? current - previous : current;
+}
+
+// NEProviderStopReason raw values: a public NS_ENUM in NetworkExtension/NEProvider.h, so ABI. C
+// cannot include that Objective-C header; the suite pins every value against the SDK's own enum.
+bool morke_stop_is_kill_switch_block(bool include_all_networks, long stop_reason) {
+    if (!include_all_networks) return false;
+    switch (stop_reason) {
+        case 2:   // providerFailed — the engine died (serviceStop's cancelTunnelWithError)
+        case 3:   // noNetworkAvailable
+        case 4:   // unrecoverableNetworkChange
+        case 7:   // configurationFailed — the provider could not be configured: a failure, not a change
+        case 14:  // connectionFailed
+        case 17:  // internalError (iOS 18.1+)
+            return true;
+        default:
+            // 0 none · 1 userInitiated · 5 providerDisabled · 6 authenticationCanceled · 8 idleTimeout ·
+            // 9 configurationDisabled · 10 configurationRemoved · 11 superceded · 12 userLogout ·
+            // 13 userSwitch · 15 sleep · 16 appUpdate — and any value this build does not know.
+            return false;
+    }
 }

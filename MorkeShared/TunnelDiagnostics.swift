@@ -42,11 +42,10 @@ import Foundation
 
 // MARK: - TunnelDiagnostics (T-INFRA-27)
 //
-// The app↔extension half of the connection report built to converge T-INFRA-26 (nothing reaches
-// the backend over Russian mobile data) in ONE round instead of three. KEPT as a permanent
-// developer tool (T-INFRA-28), and deliberately narrow: it answers one question, so do not build on
-// it, do not extend it, do not give it a second caller. Its reach is the point — half of this file
-// is the argument for why nothing else may pass through it.
+// The app↔extension half of the Diagnostics connection report, KEPT as a permanent developer tool
+// (T-INFRA-28), and deliberately narrow: it answers one question — what our own extension did — so do
+// not build on it, do not extend it, do not give it a second caller. Its reach is the point — half of
+// this file is the argument for why nothing else may pass through it.
 //
 // Two pieces, both about OUR OWN process and nothing else:
 //
@@ -125,8 +124,8 @@ public nonisolated enum TunnelDiagnostics {
 
     private static let ringName = "diagnostic-events"
 
-    // Local copy of AppGroup's private container resolver. Duplicated rather than widening
-    // AppGroup's API, so deleting this file deletes the whole feature.
+    // Local copy of AppGroup.defaultContainer(), without its test override, so deleting this file
+    // deletes the whole feature.
     private static func defaultContainer() -> URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroup.appGroupID)
     }
@@ -135,9 +134,12 @@ public nonisolated enum TunnelDiagnostics {
     // line of a diagnostic, and a pre-first-unlock on-demand start legitimately cannot write at all
     // (App-Group file protection matches the Keychain items the start gate already fails on).
     //
-    // Read-modify-write of the whole file, which is safe here because the APP never writes — it only
-    // reads — so there is exactly one writer process. `detail` carries a byte count or an
-    // NEProviderStopReason raw value; it is an Int so it can carry nothing else.
+    // Read-modify-write of the whole file, which is safe here because the APP never writes it — it
+    // reads it, and removes it only through clearEvents below — so there is exactly one writer process.
+    // `detail` carries a byte count or an NEProviderStopReason raw value; it is an Int so it can carry
+    // nothing else.
+    // The file is excluded from device backups (T-INFRA-47(a)): its exact timestamps can rebuild a
+    // person's day and it is a debug aid, not user data. The analytics ledger is NOT, by decision (P9a).
     public static func record(_ event: Event, detail: Int? = nil, container: URL? = nil) {
         guard let container = container ?? defaultContainer() else { return }
         let url = container.appendingPathComponent(ringName)
@@ -152,7 +154,29 @@ public nonisolated enum TunnelDiagnostics {
         if lines.count > ringCapacity {
             lines.removeFirst(lines.count - ringCapacity)
         }
-        try? Data(lines.joined(separator: "\n").utf8).write(to: url, options: .atomic)
+        guard (try? Data(lines.joined(separator: "\n").utf8).write(to: url, options: .atomic)) != nil
+        else { return }
+        excludeFromBackup(url)
+    }
+
+    // T-INFRA-47(a). Set after EVERY write: `.atomic` renames a new file into place, so a flag set
+    // once on the old file is gone after the next record. Best-effort like record itself: a failed
+    // attribute write costs one backup's worth of exposure and never blocks or throws.
+    private static func excludeFromBackup(_ url: URL) {
+        var url = url
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? url.setResourceValues(values)
+    }
+
+    // T-INFRA-40(d). Called from the app only, on the two DESTRUCTIVE paths and nowhere else
+    // (SettingsFeature.runLocalScrub — sign-out and account deletion, which is where the decision
+    // and its limits are written down). Best-effort and idempotent like the two functions around it:
+    // a missing file, an unresolvable container and a failed removal all degrade to "nothing
+    // cleared", never to a throw. It removes the ring, it cannot read or rewrite one.
+    public static func clearEvents(container: URL? = nil) {
+        guard let container = container ?? defaultContainer() else { return }
+        try? FileManager.default.removeItem(at: container.appendingPathComponent(ringName))
     }
 
     // Called from the app only. An unresolvable container, a missing file and a malformed line all

@@ -48,10 +48,14 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithProvider:(NEPacketTunnelProvider *)provider NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
-/// Cancel the NWPathMonitor and drop the provider reference.
+/// Cancel the path monitor and drop the interface listener (the provider stays a weak reference).
 /// Must be called before releasing the LibboxCommandServer on stop.
 - (void)reset;
 
 @end
 
 NS_ASSUME_NONNULL_END
+
+// P9g: the C helpers are called from Swift as well (TunnelAnalytics.swift), and this header is the
+// target's bridging header's one import.
+#include "MorkeTunnelNetHelpers.h"

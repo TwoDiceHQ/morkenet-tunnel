@@ -12,99 +12,153 @@ Read [README.md](README.md) first for what this repository is and is not.
 
 ## 1. The pin
 
-**sing-box `v1.13.13`, plus the Morke patch series** — upstream tag `v1.13.13` in
-[`SagerNet/sing-box`](https://github.com/SagerNet/sing-box/tree/v1.13.13), commit
-`83b73048ff772b919af18653b78ffeaa2d48b66e`, with `singbox-fork/0001-morke-trim.patch`
+**sing-box `v1.14.4`, plus the Morke patch series** — upstream tag `v1.14.4` in
+[`SagerNet/sing-box`](https://github.com/SagerNet/sing-box/tree/v1.14.4), commit
+`c005f35300ce76427dc285481ec5695f5b179cd2`, with `singbox-fork/0001-morke-trim.patch`
 applied on top.
 
 **We build a modified sing-box, and say so here because GPLv3 § 5(a) requires it.**
-The patch is dated `2026-09-04`, every file it touches carries a modification
-notice in its own header, and § 2 below is the recipe that turns the upstream tag
-plus that patch into the exact engine we ship. The upstream tag alone will **not**
-reproduce our artefact — see § 2.4.
+The patch is dated `2026-09-23`, `2026-10-04` and `2026-11-14`, every file it touches carries a
+modification notice in its own header, and § 2 below is the recipe that turns the upstream
+commit plus that patch into the exact engine we ship. The upstream tag alone will
+**not** reproduce our artefact — see § 2.4.
 
 | Artefact | Value |
 |---|---|
-| Upstream tag | `v1.13.13` |
-| Upstream commit | `83b73048ff772b919af18653b78ffeaa2d48b66e` |
+| Upstream tag | `v1.14.4` |
+| Upstream commit | `c005f35300ce76427dc285481ec5695f5b179cd2` |
 | Patch | `singbox-fork/0001-morke-trim.patch` |
-| Patch SHA-256 | `10d148d7f1e13ae51c7d1132c3ce47646a040cfadef2b1565fef2595413e0641` |
-| Version stamped into `constant.Version` | `1.13.13-morke.1` |
+| Patch SHA-256 | `ded97a1e8e4195e330ff71c0140367d26a9369ce31861cb03758644b98c76486` |
+| Version stamped into `constant.Version` | `1.14.4-morke.1` |
+
+**Pin the commit, not the tag.** Upstream has moved a release tag after the fact:
+`v1.13.13`, the base of our previous engine, pointed at
+`83b73048ff772b919af18653b78ffeaa2d48b66e` when we built from it on 2026-09-04 and
+points at `78b2e12fbdd85e6ec956647d6f79cf0bba85c6ba` today (read 2026-09-23). The old
+commit is still served by GitHub, but no tag reaches it any more, so a plain
+`git clone --branch` no longer contains it. The recipe in § 2.1 therefore fetches
+the commit by its hash.
 
 ### What the patch changes, and why
 
-Three files. Nothing is added to the engine; the patch only removes reachable
-surface and records that it did.
+Eleven files — ten modified, one added. Nothing is added to the engine's
+behaviour; the patch removes surface this client cannot reach, and one write this
+client must not leave behind, and records that it did. Every change was measured on a real build: the package set `gomobile bind`
+compiles for iOS and macOS (`GOOS=ios|darwin go list -deps -tags … ./experimental/libbox`),
+and the symbol tables of the resulting `ios-arm64` and `macos-arm64_x86_64` slices. The patch was
+first written against `v1.14.1` (2026-09-23) and re-derived against `v1.14.4` (2026-11-14): every
+file it touches was compared with upstream's changes between the two, and the package set was
+classified again.
 
 - **`include/registry.go`** — the protocol registry. Upstream registers every
   protocol it ships. Morke's client refuses all but four egress types
-  (`vless`, `direct`, `block`, `dns`), one ingress type (`tun`), no `endpoints` at
-  all, and no `experimental` key but `cache_file`, in a fail-closed check that runs
-  before any configuration reaches libbox. Everything outside that set was
-  unreachable code in a shipped build, so it is no longer registered: the SOCKS,
-  HTTP, mixed, Shadowsocks, VMess, Trojan, ShadowTLS, AnyTLS, redirect and TProxy
-  inbounds; the SOCKS, HTTP, Shadowsocks, VMess, Trojan, Tor, SSH, ShadowTLS,
-  AnyTLS, selector and urltest outbounds; the `ssm-api` service; the
+  (`vless`, `direct`, `block`, `dns`), one ingress type (`tun`), no `endpoints`,
+  no `services`, no `certificate_providers` and no `experimental` key but
+  `cache_file`, in a fail-closed check that runs before any configuration reaches
+  libbox. Everything outside that set was unreachable code in a shipped build, so
+  it is no longer registered: the SOCKS, HTTP, mixed, Shadowsocks, Snell, VMess,
+  Trojan, Naive, ShadowTLS, VLESS, AnyTLS, redirect and TProxy inbounds; the
+  SOCKS, HTTP, Shadowsocks, Snell, VMess, Trojan, Tor, SSH, ShadowTLS, AnyTLS,
+  bridge, selector and urltest outbounds; the `api` and `ssm-api` services; the
   `cloudflare-origin-ca` certificate provider. An unexpected type now fails to
   decode instead of being constructed.
 - **`cmd/internal/build_libbox/main.go`** — the build script. The optional-feature
-  tags drop to `with_gvisor,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0`
+  tags drop to `with_gvisor,with_utls,badlinkname,tfogo_checklinkname0`
   (+ `grpcnotrace` on Darwin, + `with_low_memory` off macOS), the Apple bind target
   drops the two tvOS slices nothing links, and the version stamp stops shelling out
   to `git describe` so the build no longer depends on VCS state.
-- **`cmd/internal/sizeprobe/main.go`** — new. A `main` package that imports
-  nothing but `experimental/libbox`, so the effect of a tag or registry change on
-  the linked set can be measured in seconds instead of a full `gomobile bind`.
-  It is how the removals above were verified, one at a time, against real binary
-  sizes rather than against what looked unused. Not required to generate, install
-  or run the extension, and **it cannot affect the digests in § 2.3**: nothing
-  imports it — `go list -deps ./experimental/libbox` does not mention it — so it
-  is never linked into `Libbox.xcframework`. Published because a claim about what
-  was removed is worth more with the instrument beside it.
+- **`experimental/libbox/native_shell_session.go`** and its stub — the build
+  constraint excludes both Apple platforms: iOS since 2026-09-23, macOS since
+  2026-11-14. Upstream builds the file on Linux, Android, macOS and iOS, which links
+  the Tailscale SSH server — and through it the whole Tailscale client and
+  `wireguard-go` — into every Apple build, whatever `with_tailscale` says. The two
+  functions it defines are called only by a host application that runs a shell
+  server; neither the iOS extension nor the macOS system extension does.
+- **`experimental/libbox/bridge_service_darwin.go`** and `bridge_stub.go` — the
+  same for `NewBridgeService`, a privileged L3 forwarder that upstream supports on
+  iOS only when jailbroken: the file now builds nowhere (`//go:build ignore`), and
+  the stub covers every platform but Linux.
+- **`daemon/started_service_tailscale_ssh.go`** and a new
+  **`daemon/started_service_tailscale_ssh_stub.go`** — the gRPC method that opens
+  an SSH session to a Tailscale peer builds only with `with_tailscale`; otherwise
+  the stub answers it. This is the pattern upstream already uses for USB/IP. A
+  build without Tailscale cannot construct the endpoint the method needs, so it
+  could never succeed; ungated, it still linked `golang.org/x/crypto/ssh`.
+- **`experimental/libbox/log.go`** — two changes. `CreateZipArchive` no longer
+  offers its `encrypt` mode, which seals a report archive to SagerNet's own `age`
+  recipient and links `filippo.io/age` and `filippo.io/hpke`. It is called only by
+  a host application exporting reports upstream; this one does not. And
+  `saveConfigSnapshot` writes nothing (added 2026-10-04, version `morke.2`):
+  upstream writes the whole configuration to `<basePath>/configuration.json`, mode
+  `0666`, on every start, and nothing ever deletes it. A Morke configuration
+  carries the account's live proxy credential, which the client otherwise keeps
+  only in the Keychain. Nothing reads the file back for behaviour — the engine
+  starts from the configuration in memory, and the only reader copies the file
+  into a crash, out-of-memory or power report and skips it when it is absent — so
+  the reports simply go without it. The function and its call stay, so upstream's
+  shape stays recognisable.
+- **`experimental/libbox/oom_report.go`** — an out-of-memory report no longer
+  contains the engine's log or a `connections.json` listing every open and
+  recently closed connection with its source, destination and domain. `v1.14`
+  added both; `v1.13.13`'s report had neither. A traffic record on disk is
+  something this client does not keep, whatever the reason.
+- **`service/powerreport/device_darwin.m`** (added 2026-11-14) — the load-time
+  constructor `v1.14.4` added is removed. On iOS it ran when the library loaded,
+  whatever the host asked for, and switched on the device's battery monitoring
+  for the life of the process. The battery is read only by the power-report
+  recorder, which this client never enables; the reading function stays and,
+  unmonitored, reports what it reports on a device without a battery.
 
-### Tags kept, and one kept deliberately
+The previous patch also added `cmd/internal/sizeprobe`, a measuring program. It is
+not carried forward: the measurements above need no code in the tree.
+
+### Tags kept, and one tag no longer kept
 
 `with_gvisor` is required: the iOS kill switch sets `includeAllNetworks`, with which
 sing-box's `system` and `mixed` TUN stacks are incompatible, so `tun.stack` becomes
 `gvisor`. `with_utls` is required: REALITY is built on uTLS, and removing it removes
 the proxy.
 
-**`with_clash_api` is retained, and that is not an oversight.** Turning it off breaks
-every start. `daemon/instance.go` passes a `PlatformLogWriter` to `box.New`
-unconditionally; `box.go` treats a non-nil `PlatformLogWriter` as *needs the Clash
-API*, calls `experimental.NewClashServer`, and without the tag that constructor is
-nil and returns `os.ErrInvalid` — so `box.New` fails with
-`create clash-server: invalid argument`. Unlinking the package would additionally
-require editing `daemon/started_service.go`, which imports `experimental/clashapi`
-with no build tag at all. Neither change is in this patch. The Clash control server
-is nonetheless unreachable in the shipped product: it is only constructed from an
-`experimental.clash_api` block, and the client refuses any `experimental` key but
-`cache_file` before the configuration is handed to libbox.
+**`with_clash_api` is removed in this version.** The `v1.13.13` patch had to keep
+it: that version turned the platform log writer libbox always passes into a Clash
+API server, so a build without the tag failed every start. Since `v1.14.1` it builds the
+Clash API server only from an `experimental.clash_api` block, and its daemon imports
+`experimental/clashmode` instead of `experimental/clashapi`, so the tag now unlinks
+the control server entirely. Measured: configurations of exactly the shapes the
+client sends decode and construct without it — through `box.New` with the platform
+log writer libbox always passes, the path that failed on `v1.13.13` — and one
+carrying `experimental.clash_api` is refused with
+`clash api is not included in this build`.
 
 ---
 
 ## 2. Build `Libbox.xcframework` from source
 
-No prebuilt releases exist; the framework is built from the pinned tag plus the patch.
+No prebuilt releases exist; the framework is built from the pinned commit plus the patch.
 
 **Prerequisites**
 
-- Go ≥ 1.22 — the published artefact was built with **go1.26.4 darwin/arm64**
+- Go ≥ 1.25.5 — the published artefact was built with **go1.26.10 darwin/arm64**, the
+  toolchain upstream's own `v1.14.4` release uses; with a newer local Go, select it with
+  `GOTOOLCHAIN=go1.26.10` (the recipe does), because a different toolchain links a different
+  standard library and no digest below will match
 - Xcode with the full command-line tools — `xcode-select -p` must point at
   `Xcode.app`, not at the CommandLineTools stub. The published artefact was built
-  with **Xcode 26.4.1 (17E202)**.
+  with **Xcode 27.2 (27B52)**.
 
 > **sing-box uses its own gomobile fork** (`github.com/sagernet/gomobile`),
-> installed by `make lib_install` — pinned at `v0.1.12`. Upstream
+> installed by `make lib_install` — pinned at `v0.1.13` for this version (as for `v1.14.1`). Upstream
 > `golang.org/x/mobile/cmd/gomobile` is **incompatible**. The Makefile target is
 > **`lib_apple`** — there is no `lib_ios` target.
 
 ### 2.1 The recipe
 
 ```sh
-git clone --branch v1.13.13 https://github.com/SagerNet/sing-box.git
-cd sing-box
-git checkout 83b73048ff772b919af18653b78ffeaa2d48b66e
+git init sing-box && cd sing-box
+git remote add origin https://github.com/SagerNet/sing-box.git
+git fetch --depth 1 origin c005f35300ce76427dc285481ec5695f5b179cd2
+git checkout FETCH_HEAD
+export GOTOOLCHAIN=go1.26.10
 
 # 1. Apply the Morke patch series
 patch -p1 < <path-to-this-repo>/singbox-fork/0001-morke-trim.patch
@@ -115,11 +169,10 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 
 # 3. Build the Apple xcframework (iOS device + simulator, macOS)
 #    Runs: go run ./cmd/internal/build_libbox -target apple
-#    Takes several minutes; downloads many Go modules on first run.
+#    Takes a few minutes; downloads many Go modules on first run.
 make lib_apple
 
 # 4. Place the output where the Xcode project expects it
-find . -maxdepth 2 -name "Libbox.xcframework"
 mv Libbox.xcframework <morke-tree>/Frameworks/Libbox.xcframework
 ```
 
@@ -134,9 +187,9 @@ those two were never linked into any shipped binary.
 
 | Slice | `Libbox` (static library) |
 |---|---|
-| `ios-arm64` | 41 759 144 bytes |
-| `ios-arm64_x86_64-simulator` | 81 359 344 bytes |
-| `macos-arm64_x86_64` | 108 408 328 bytes |
+| `ios-arm64` | 47 309 344 bytes |
+| `ios-arm64_x86_64-simulator` | 92 165 872 bytes |
+| `macos-arm64_x86_64` | 89 525 584 bytes |
 
 **The product is a static library.**
 `Libbox.xcframework/ios-arm64/Libbox.framework/Libbox` is an `ar` archive —
@@ -145,12 +198,21 @@ those two were never linked into any shipped binary.
 
 ### 2.3 Verifying the artefact — this build IS reproducible
 
-Two builds of this source, from different directories on different runs, produce
-`Libbox` files that are **identical except for three bytes**: the ASCII mtime that
-`libtool` stamps into the `__.SYMDEF` member header of the `ar` archive. Blank the
-member mtimes and the digest is stable.
+Two builds of this source, from different directories and with separate Go build
+caches, produce `Libbox` files whose object members are byte-identical. They can
+differ in two places, both inside the `__.SYMDEF` symbol index that `libtool`
+writes at the head of each `ar` archive — one archive in the `ios-arm64` slice,
+one per architecture in the two universal slices:
 
-`singbox-fork/libbox-digest.py` does exactly that and nothing else — 40 lines,
+- the ASCII mtime in the index's member header, which `libtool` stamps with the
+  build time;
+- the alignment pad after the last symbol name in the index's string table, which
+  `libtool` never initialises — it may hold zeros in one build and stray bytes in
+  the next.
+
+Blank the member mtimes and zero that pad, and the digest is stable.
+
+`singbox-fork/libbox-digest.py` does exactly that and nothing else — 79 lines,
 stdlib only, no network, readable in a minute:
 
 ```sh
@@ -162,13 +224,35 @@ Expected, for the engine shipped with this tag:
 
 | Slice | Canonical SHA-256 |
 |---|---|
-| `ios-arm64` | `914762d253683aa3dd6e3aa8c05dced89b376cb5f848fda727f6db781863e9c4` |
-| `ios-arm64_x86_64-simulator` | `9da5ded81a894e46eac647e0d616cc21f0f6dcbf851db477af0d380d757a2b26` |
-| `macos-arm64_x86_64` | `e37d577ee6b8b9936f824c6968cb2cd8a1868346c8ed85b86eba036f3f641f76` |
+| `ios-arm64` | `90c1a0941ceeaacd415d13864e017af8f031a67ad3746f7c069da075c66ad4c5` |
+| `ios-arm64_x86_64-simulator` | `91f0957a4bc7d0411c6b2effbc484eabcff9b7f104ed5d6ba562ab9962a9f729` |
+| `macos-arm64_x86_64` | `c43d25efecc048bf4bbe378d89c5aaa2c551c9cdfe2d87b66f377def9dd48085` |
+
+Measured on two builds from two fresh fetches of the commit, in separate directories with
+separate Go build caches (2026-11-14). The previous engine, `1.14.1-morke.2`, was
+`4a3a7fcf…358b` · `e2aa6512…6b37` · `c5f40142…629e`.
 
 A plain `shasum -a 256` of the same files will **not** match between builds, by
-exactly those three bytes per slice. That is a property of `libtool`, not of the
-source.
+exactly those bytes. That is a property of `libtool`, not of the source.
+
+**A correction to the previous release, 2026-10-04.** Until 2026-10-04 the script
+blanked only the mtimes, and this section said two builds differ **only** there.
+That held for the `1.14.1-morke.1` engine by luck, not by construction: both of
+its builds happened to get a zero pad. Two builds of `1.14.1-morke.2` did not —
+one carried stray bytes in the `ios-arm64` pad, the other in the simulator
+slice's second architecture — while all of their object members were identical.
+The script now also zeroes the pad. Zeroing a pad that is already zero changes
+nothing, so every digest published earlier is unchanged under the new method:
+the three `1.14.1-morke.1` values (`64d894dd…c6b3`, `7f720677…b804`,
+`3cc9db0a…9d11`) and the `v1.13.13` `ios-arm64` value below, re-measured on the
+archived engines.
+
+**A correction to the previous release.** Until 2026-09-23 the script blanked only
+the first archive it found, so for the two universal slices it left the second
+architecture's timestamp in place. The `ios-arm64` digest published for `v1.13.13`
+(`914762d2…e9c4`) was and remains reproducible — that slice holds one archive, and
+the corrected script prints the same value for it. The two universal-slice digests
+published alongside it were not reproducible by anyone else.
 
 ### 2.4 If you build the upstream tag instead
 
@@ -317,8 +401,16 @@ non-secret marker in `providerConfiguration`. `AppGroup` and
 
 ## 5. What is deliberately absent
 
-This repository contains no network client. The extension has no `URLSession`,
-no API base URL and no credential of its own; it reads a configuration the app
-placed for it and hands it to libbox. That is a verifiable property of the
-shipped binary as well as of this source — see
-[README.md § Provenance](README.md#provenance-and-what-it-does-not-prove).
+This repository contains no network client. The extension's own code — every
+file in `MorkeTunnel/` and `MorkeShared/` — has no `URLSession`, no API base URL
+and no credential of its own; it reads a configuration the app placed for it and
+hands it to libbox.
+
+The engine is a different matter, and it is said plainly here because an earlier
+version of this file got it wrong. sing-box carries an HTTP client of its own for
+downloading remote rule-sets, and besides its default Go implementation that
+includes one built on `NSURLSession` (sing-box's `apple` HTTP engine) — so the
+shipped binary **does** reference `NSURLSession`, and has since `v1.13.13`. Neither
+is a control-plane client: they fetch only what a configuration names, and the
+configurations this app hands over select neither engine explicitly, which leaves
+Go's. See [README.md § Provenance](README.md#provenance-and-what-it-does-not-prove).

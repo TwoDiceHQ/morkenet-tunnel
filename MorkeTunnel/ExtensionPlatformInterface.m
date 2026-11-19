@@ -52,9 +52,9 @@
 // Single os_log destination for the whole extension lifetime. Subsystem/category
 // match PacketTunnelProvider's Swift Logger so the entire NE appears under one
 // Console.app filter: Subsystem = "tech.twodice.morke", Category = "tunnel".
-// NOTE: independent of Swift — keep byte-identical by hand with MorkeShared.MorkeLog.subsystem,
-// MorkeFeatures.FeatureLog.subsystem, and MorkeGlobe.GlobeLog.subsystem (mirrors the
-// SharedKeychain.swift:16-17 warning): a rename that misses one silently splits the Console.app filter.
+// NOTE: independent of Swift — keep byte-identical by hand with MorkeShared.MorkeLog.subsystem and
+// MorkeFeatures.FeatureLog.subsystem (mirrors the warning in SharedKeychain.swift's "Two-namespace
+// split" note): a rename that misses one silently splits the Console.app filter.
 static os_log_t MorkeTunnelLog(void) {
     static os_log_t log;
     static dispatch_once_t once;
@@ -135,7 +135,7 @@ static os_log_t MorkeTunnelLog(void) {
 
 @interface ExtensionPlatformInterface () {
     // Written by the nw_path_monitor handler (monitorQueue).
-    // Read by libbox goroutine threads (autoDetectInterfaceControl:).
+    // Read only by autoDetectInterfaceControl:, which this engine never calls (see there).
     // C11 atomic ensures cross-thread visibility without additional locks.
     _Atomic int32_t _currentIfaceIndex;
 
@@ -149,8 +149,7 @@ static os_log_t MorkeTunnelLog(void) {
     // property could NOT express that: atomicity guards each store in isolation, not the
     // read-cancel-nil sequence. The serial queue also supplies the happens-before for these plain
     // (non-atomic) fields. nw_path_monitor_t is an ARC object type, so `_pathMonitor` is a strong
-    // ivar (assignment retains, `= nil` releases) — identical memory semantics to the former
-    // strong property, minus the racy accessor.
+    // ivar (assignment retains, `= nil` releases).
     nw_path_monitor_t _pathMonitor;
     BOOL              _pathMonitorTornDown;
 }
@@ -195,12 +194,10 @@ static os_log_t MorkeTunnelLog(void) {
 
 - (void)tearDownPathMonitor {
     // Single-owner teardown. Confine cancel+nil of _pathMonitor to the serial monitorQueue so it
-    // can never race the publish in startDefaultInterfaceMonitor: (also monitorQueue-confined):
+    // can never race the publish in startDefaultInterfaceMonitor: (also monitorQueue-confined), and
     // this method's two callers — reset() on the NE provider queue and closeDefaultInterfaceMonitor:
-    // on a libbox goroutine — previously ran this nonatomic objc_storeStrong concurrently and could
-    // both release the same monitor (over-release → use-after-free mid-disconnect, audit F-2).
-    // Serializing every mutation of _pathMonitor onto one queue removes that race WITHOUT holding a
-    // lock across an nw_* call.
+    // on a libbox goroutine — can never both release the same monitor (over-release → use-after-free
+    // mid-disconnect, audit F-2), WITHOUT holding a lock across an nw_* call.
     //
     // F-6: the nw_path update handler ALSO runs on monitorQueue, so this dispatch_sync first DRAINS
     // any in-flight handler, THEN cancels; after nw_path_monitor_cancel no further handler fires, and
@@ -324,8 +321,8 @@ static os_log_t MorkeTunnelLog(void) {
     if (dnsServers.count > 0) {
         NEDNSSettings *dns = [[NEDNSSettings alloc] initWithServers:dnsServers];
         // matchDomains = @[@""] makes the resolver override hold for ALL queries, not only while
-        // the tunnel owns the default route (sing-box-for-apple parity). No-op on today's
-        // full-tunnel configs; matters once a T-ROUTE split-tunnel config exists.
+        // the tunnel owns the default route (sing-box-for-apple parity). No-op today: every config
+        // owns it, Smart included — T-ROUTE splits in the engine's route rules, not in OS routes.
         dns.matchDomains = @[@""];
         settings.DNSSettings = dns;
     } else if ([options getAutoRoute]) {
@@ -415,7 +412,10 @@ static os_log_t MorkeTunnelLog(void) {
 
 // Binds the outgoing socket to the current physical default interface so that
 // non-TUN traffic (proxy connections, DNS, health checks) bypasses the VPN.
-// sing-box calls this for every socket it creates when usePlatformAutoDetectInterfaceControl=NO.
+// NEVER CALLED by this engine: sing-box calls it only when usePlatformAutoDetectInterfaceControl
+// is YES (route/network.go, read at the pinned v1.14.1); with NO it binds each socket itself, in
+// Go. Harmless, not load-bearing — Docs/reference/singbox-integration.md
+// § `autoDetectInterfaceControl:fd:` — socket binding.
 - (BOOL)autoDetectInterfaceControl:(int32_t)fd error:(NSError **)error {
     int32_t ifindex = atomic_load(&_currentIfaceIndex);
     if (ifindex == 0) return YES; // interface not yet known — skip binding, don't fail
@@ -436,7 +436,6 @@ static os_log_t MorkeTunnelLog(void) {
 
 - (BOOL)usePlatformShell { return NO; }
 - (BOOL)checkPlatformShell:(NSError **)error { return YES; }
-- (BOOL)useProcFS { return NO; }
 
 - (nullable LibboxConnectionOwner *)findConnectionOwner:(int32_t)ipProtocol
                                           sourceAddress:(nullable NSString *)sourceAddress
@@ -471,7 +470,7 @@ static os_log_t MorkeTunnelLog(void) {
             return false; // stop after first (highest-priority) interface
         });
 
-        // Publish new index so autoDetectInterfaceControl: picks it up on next call.
+        // Publish the index for autoDetectInterfaceControl: (never called by this engine — see there).
         atomic_store(&strongSelf->_currentIfaceIndex, index);
 
         BOOL isExpensive   = nw_path_is_expensive(path);
@@ -621,14 +620,12 @@ static os_log_t MorkeTunnelLog(void) {
 
 - (BOOL)underNetworkExtension { return YES; }
 
-// Report the REAL includeAllNetworks the OS is enforcing, read from the tunnel profile, instead of a
-// hardcoded NO (T-CFG-17). sing-box uses this solely to SELECT the TUN stack: includeAllNetworks=YES
+// Report the REAL includeAllNetworks the OS is enforcing, read from the tunnel profile, never a
+// hardcoded value (T-CFG-17). sing-box uses this solely to SELECT the TUN stack: includeAllNetworks=YES
 // forces the gVisor stack — the system/mixed stack is rejected under includeAllNetworks (libbox
 // tun.NewStack → ErrIncludeAllNetworks). The app pairs this by rewriting the config's TUN stack to gVisor
 // whenever the kill switch (includeAllNetworks) is on (SingBoxKillSwitchStack), so the engine's stack
-// choice and the OS policy always agree. With the kill switch OFF this returns NO — identical to the
-// previous hardcoded value, so the KS-OFF path is byte-for-byte unchanged. self.provider is weak;
-// messaging nil safely yields NO. includeAllNetworks is an NEVPNProtocol property (iOS 14+).
+// choice and the OS policy always agree. self.provider is weak; messaging nil safely yields NO.
 - (BOOL)includeAllNetworks {
     return self.provider.protocolConfiguration.includeAllNetworks;
 }
@@ -636,13 +633,34 @@ static os_log_t MorkeTunnelLog(void) {
 - (void)clearDNSCache {}
 - (nullable LibboxWIFIState *)readWIFIState { return nil; }
 
-// MARK: - LibboxPlatformInterface — notifications & certificates
+// MARK: - LibboxPlatformInterface — notifications & local DNS transport
 
 - (BOOL)sendNotification:(LibboxNotification *)notification error:(NSError **)error {
     return YES;
 }
+// libbox v1.14: the counterpart of sendNotification:. Its only caller is the Tailscale Taildrop
+// code, which the Morke build does not link; a no-op, like sendNotification: above.
+- (BOOL)cancelNotification:(nullable NSString *)identifier typeID:(int32_t)typeID error:(NSError **)error {
+    return YES;
+}
 - (nullable id<LibboxLocalDNSTransport>)localDNSTransport { return nil; }
-- (nullable id<LibboxStringIterator>)systemCertificates   { return nil; }
+
+// MARK: - LibboxPlatformInterface — L3 bridge (libbox v1.14; not provided)
+
+// Asked only by protocol/bridge, the privileged L3 forwarder behind the `bridge` outbound. The
+// Morke build registers no such outbound and does not link the package on iOS, so neither is
+// reachable; the answers match libbox's own platform stub (false / an error).
+- (BOOL)usePlatformBridge { return NO; }
+
+- (nullable id<LibboxBridgeSession>)createBridge:(nullable LibboxBridgeOptions *)options
+                                           error:(NSError **)error {
+    if (error) {
+        *error = [NSError errorWithDomain:kMorkeTunnelErrorDomain code:22
+                                 userInfo:@{NSLocalizedDescriptionKey:
+                                                @"L3 bridge not supported"}];
+    }
+    return nil;
+}
 
 // MARK: - LibboxPlatformInterface — shell / SSH stubs (iOS: not applicable)
 

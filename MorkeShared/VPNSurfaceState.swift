@@ -52,10 +52,11 @@ import Foundation
 //   NetworkExtension (VPNSurfaceStateTests), so a raw value can never drift unnoticed — the same
 //   "one derivation, one place, one test" discipline the key fingerprint uses.
 //
-// It is also what lets a widget or Control Center extension read the whole surface by linking
+// It is also what lets the Packet Tunnel extension write this document (its stop path) while linking
 // MorkeShared ALONE, which has zero package dependencies. Any richer home (MorkeModels pulls in
 // swift-sharing; MorkeServices pulls in swift-dependencies) would make the smallest consumer of
-// this file pay for a dependency graph it has no other use for.
+// this file pay for a dependency graph it has no other use for. (The widget links MorkeServices
+// anyway, because it compiles MorkeIntents.)
 
 public enum VPNSurfaceStatus: Int, Codable, Sendable, Equatable {
     case invalid       = 0
@@ -80,15 +81,12 @@ public enum VPNSurfaceStatus: Int, Codable, Sendable, Equatable {
 // callers reloading this name, a control that renders on/off state would show whatever it showed
 // when it was last touched — forever. See MorkeWidget/ProtectionControl.swift.
 //
-// ⚠️ `controlKind` NAMES THE TEMPLATE TYPE ON PURPOSE, and that is a working rule rather than a
-// label. The system archives a control's GALLERY PREVIEW in a file keyed by this string, inside the
-// widget extension's own data container — which survives an app update. Change the template under an
-// unchanged key and the archive stops matching: the placed control still renders (the extension
-// draws it live) while the "Add a Control" gallery shows an EMPTY CIRCLE that no reinstall clears.
-// That happened once, on 2026-09-09, going from `ControlWidgetButton` to `ControlWidgetToggle` under
-// `MorkeProtectionControl`. Keeping the type IN the name makes the next such change impossible to
-// make silently: a button would have to be called `MorkeProtectionButton`, which is a new key, which
-// is exactly the bump the situation requires. Full post-mortem: ProtectionControl.swift.
+// ⚠️ `controlKind` NAMES THE TEMPLATE TYPE ON PURPOSE — a working rule, not a label. The system
+// archives a control's GALLERY PREVIEW under this key in the widget extension's own data container,
+// which survives an app update; a new template under an unchanged key leaves the "Add a Control"
+// gallery showing an EMPTY CIRCLE that no reinstall clears (2026-09-09, `ControlWidgetButton` →
+// `ControlWidgetToggle`). With the type in the name, a button would have to be `MorkeProtectionButton`:
+// a new key, which is exactly the bump that change requires. Full post-mortem: ProtectionControl.swift.
 
 public enum VPNSurfaceWidget {
     public static let kind = "MorkeProtectionWidget"
@@ -97,11 +95,12 @@ public enum VPNSurfaceWidget {
 
 // MARK: - VPNSurfaceState
 //
-// The ONE thing every out-of-app surface reads (T-EXT-0): a small JSON document in the App-Group
-// container carrying the connection state, which node it is about, and the last ping we measured
-// for that node. Widget, Control Center control and Shortcuts all read this and nothing else, so
-// they cannot disagree with each other — and none of them needs to touch NetworkExtension, which
-// they could not use anyway (see ToggleVPNIntent's header for why).
+// The ONE thing every out-of-app surface that renders state reads (T-EXT-0): a small JSON document
+// in the App-Group container carrying the connection state, which node it is about, and the last
+// ping we measured for that node. The widget and the Control Center control read this and nothing
+// else, so they cannot disagree with each other — and neither needs to touch NetworkExtension, which
+// they could not use anyway (see ToggleVPNIntent's header for why). Shortcuts run ToggleVPNIntent in
+// the app's process; it reads the live NEVPNStatus, not this document.
 //
 // ⚠️ WHAT MAY NOT GO IN HERE, and the rule is absolute. This is an unencrypted file on disk in a
 // container every one of our processes can read. The activation key, the JWT, the device
@@ -177,11 +176,13 @@ public struct VPNSurfaceState: Codable, Sendable, Equatable {
 // NOT `#if os(iOS)`-walled, and the reason is exactly T-CFG-53's for the re-arm intent: the
 // restriction that governs this container was never about resolving it, it was about using it as
 // an app↔SYSTEM-EXTENSION channel, which macOS cannot do (containerURL resolves per user and the
-// sysext runs as root — see AppGroup's header). Nothing here crosses that boundary; the only
-// writer is the app process and the only readers are iOS app extensions, which run as the user.
+// sysext runs as root — see AppGroup's header). Nothing here relies on that boundary: the writers
+// are the app process and the iOS Packet Tunnel appex (its stop path, PacketTunnelProvider's
+// publishStoppedToSurfaces), the readers are iOS app extensions, and all of them run as the user.
+// (The macOS system extension runs the same stop path into root's container, where nothing reads it.)
 // Leaving the helpers platform-neutral is also what lets the macOS-hosted test target exercise
 // them at all. What IS iOS-scoped is the PUBLISHING (VPNSurfacePublisher), because the surfaces
-// that consume this are iOS-only and the macOS section is paused.
+// that consume this are iOS-only: the Mac app, active again since 2026-10-14, has none.
 
 extension AppGroup {
 
@@ -208,13 +209,14 @@ extension AppGroup {
         return try? JSONDecoder().decode(VPNSurfaceState.self, from: data)
     }
 
-    // Read-modify-write for the ONE caller that knows the status but not the node — the toggle
-    // intent, which may run in a freshly launched background app process with no UI state at all.
-    // Preserving the node/ping half is what keeps a widget-initiated connect from blanking the
-    // server name the widget is displaying. Single-process by construction (the intent runs in the
-    // app's process, never a widget's), so the read and the write cannot interleave across
-    // processes; an in-process interleave costs one field for one write and is corrected by the
-    // next publish.
+    // Read-modify-write, and every publish goes through it: VPNSurfacePublisher.publish (HomeFeature,
+    // the whole document), VPNSurfacePublisher.publishStatus (VPNToggle, for the toggle intent, which
+    // may run in a freshly launched background app process with no UI state at all) and
+    // PacketTunnelProvider's stop path. The last two know the status but not the node: preserving the
+    // node/ping half is what keeps a widget-initiated connect from blanking the server name the widget
+    // is displaying. NOT single-process: the app and the Packet Tunnel extension both call it, and
+    // nothing locks across processes, so a read and a write can interleave. Either kind of interleave
+    // costs one field for one write and is corrected by the next publish.
     public static func updateVPNSurfaceState(
         container: URL? = nil,
         _ mutate: (inout VPNSurfaceState) -> Void

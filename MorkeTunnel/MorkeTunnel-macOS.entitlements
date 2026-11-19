@@ -4,13 +4,20 @@
 <dict>
 	<key>com.apple.developer.networking.networkextension</key>
 	<array>
-		<string>packet-tunnel-provider-systemextension</string>
+		<string>$(MORKE_NE_PROVIDER)</string>
 	</array>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<!-- App Group and keychain group per variant (P75): build settings set per configuration in
+	     project.pbxproj, so the Release values are today's strings and the Debug build, "Morke Dev",
+	     signs the Dev ones (group.tech.twodice.morke.dev, tech.morke.dev.shared). MorkeShared selects
+	     the same values with `#if os(macOS) && DEBUG`; the two must move together. The NE value is
+	     per configuration too: Release is Developer ID signed and needs the `-systemextension`
+	     variant; Debug is Apple Development signed (Xcode's automatic signing), whose profile allows
+	     plain `packet-tunnel-provider` only (Docs/reference/macos-system-extension.md § 3). -->
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.tech.twodice.morke</string>
+		<string>$(MORKE_APP_GROUP)</string>
 	</array>
 	<key>com.apple.security.network.client</key>
 	<true/>
@@ -18,7 +25,7 @@
 	<true/>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)tech.morke.shared</string>
+		<string>$(AppIdentifierPrefix)$(MORKE_KEYCHAIN_GROUP)</string>
 	</array>
 </dict>
 </plist>
