@@ -17,14 +17,17 @@ exists to say. Moving the notice changes nothing legally: the grant is in
 ## What this licence covers
 
 **Every file in THIS repository**, under the **GNU General Public License,
-version 3 or later**. That set is the Corresponding Source (GPLv3 § 1) of
-`MorkeTunnel.appex`, the Network Extension inside the Morke VPN iOS and macOS
-applications:
+version 3 or later**. That set is the Corresponding Source (GPLv3 § 1) of the
+Morke tunnel extension as each platform ships it: `MorkeTunnel.appex`, the app
+extension inside the Morke VPN iOS application, and
+`tech.twodice.morke.tunnel.systemextension`, the system extension inside the
+Morke VPN macOS application:
 
 | Path | What it is |
 |---|---|
 | `MorkeTunnel/` | the extension's own sources, and the bundle configuration, entitlements and privacy manifest needed to generate and install it |
 | `MorkeShared/` | the app↔extension surface module the extension links |
+| `MorkeTunnelMac/` | the macOS system extension's executable host, `main.swift`, which only the macOS build compiles |
 | `macOS/` | the one build input, outside `MorkeTunnel/`, that the macOS system-extension build needs |
 | `singbox-fork/` | **our modification to sing-box**, as a patch against the upstream tag, plus the digest checker that verifies a rebuild |
 | `LICENSE`, `README.md`, `BUILD.md`, `MANIFEST.md`, this file | written for publication: the licence text, the front page, the build recipe § 1 obliges us to give, and the manifest that states the membership rule |
@@ -105,8 +108,12 @@ any derivative of the engine. It does not restrict the freedoms granted by
 between *"version 3 only"* and *"version 3 or later"* — the choice is made by the
 copyright holder in the per-file notices, which is where the GPL's own
 instructions put it. Ours say **"either version 3 of the License, or (at your
-option) any later version"**, in all 13 perimeter files, and upstream sing-box
-says the same.
+option) any later version"**, in 20 of the 21 source files here (counted
+2026-11-23: the 8 in `MorkeTunnel/` and the 12 in `MorkeShared/`), and upstream
+sing-box says the same. The 21st, `MorkeTunnelMac/main.swift`, carries no
+per-file notice of its own: it is published exactly as it shipped, and the first
+sentence of this file places it, with every other file here, under version 3 or
+later.
 
 So an automatic detector reading only `LICENSE` may label this repository
 **`GPL-3.0-only`**. That label is the detector's inference from a file that
