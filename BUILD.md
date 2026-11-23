@@ -386,16 +386,160 @@ that declaration is complete.
 
 ## 4. macOS
 
-The same sources also build `MorkeTunnel (macOS)` as a **system extension**
-rather than an app extension, with `MorkeTunnel-macOS.entitlements` and a
-separate `Info.plist`, and with an executable host (`main.swift`) that is not
-part of this repository's perimeter because it is not compiled into the iOS
-appex. The one behavioural difference the sources encode is that the macOS
-system extension runs sandboxed **as root**, where `SecItem` returns
-`errSecNotAvailable` — so on macOS the tunnel configuration travels in
-`providerConfiguration`, and on iOS it lives in the shared Keychain with only a
-non-secret marker in `providerConfiguration`. `AppGroup` and
-`PacketTunnelProvider` both carry that split.
+The same sources also build `MorkeTunnel (macOS)`, a **system extension**
+(`com.apple.product-type.system-extension`) rather than an app extension. The
+Morke Mac app embeds it under `Contents/Library/SystemExtensions/`, and it has
+been conveyed since 27.0.0 (4), released on 2026-11-17 by direct download
+(Developer ID, notarized).
+
+**The host, `MorkeTunnelMac/main.swift`.** A system extension is a standalone
+executable rather than a plug-in its host loads, so `main.swift` enters
+NetworkExtension's system-extension mode itself (`NEProvider.startSystemExtensionMode()`),
+which instantiates `PacketTunnelProvider` from the `NEProviderClasses` map of its
+`Info.plist`. Before that it publishes the `NEMachServiceName` as an XPC listener
+that accepts only the signed Morke app and carries the tunnel configuration, its
+removal and the Kill Switch flag into the extension (`MorkeShared/TunnelControl.swift`,
+`MorkeShared/TunnelConfigCache.swift`).
+
+The target's **Release** configuration, the one that is conveyed, copied verbatim
+from the project's `XCBuildConfiguration` block for `MorkeTunnel (macOS)` as of
+`MARKETING_VERSION = 27.0.0` / `CURRENT_PROJECT_VERSION = 4`:
+
+```
+CLANG_COVERAGE_MAPPING                  = NO
+CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = NO
+CODE_SIGN_ENTITLEMENTS                  = "MorkeTunnel/MorkeTunnel-macOS.entitlements"
+"CODE_SIGN_IDENTITY[sdk=macosx*]"       = "Developer ID Application"
+CODE_SIGN_STYLE                         = Manual
+CURRENT_PROJECT_VERSION                 = 4
+DEAD_CODE_STRIPPING                     = YES
+DEVELOPMENT_TEAM                        = ""
+"DEVELOPMENT_TEAM[sdk=macosx*]"         = VM3XX8889Q
+ENABLE_DEBUG_DYLIB                      = NO
+ENABLE_HARDENED_RUNTIME                 = YES
+GENERATE_INFOPLIST_FILE                 = NO
+INFOPLIST_FILE                          = "Config/MorkeTunnel-macOS-Info.plist"
+LD_RUNPATH_SEARCH_PATHS                 = ("$(inherited)",
+                                           "@executable_path/../Frameworks",
+                                           "@loader_path/../Frameworks")
+MACOSX_DEPLOYMENT_TARGET                = 14.0
+MARKETING_VERSION                       = 27.0.0
+MORKE_APP_GROUP                         = group.tech.twodice.morke
+MORKE_DISPLAY_NAME                      = Morke
+MORKE_KEYCHAIN_GROUP                    = tech.morke.shared
+MORKE_NE_PROVIDER                       = "packet-tunnel-provider-systemextension"
+PRODUCT_BUNDLE_IDENTIFIER               = tech.twodice.morke.tunnel
+PRODUCT_NAME                            = "$(PRODUCT_BUNDLE_IDENTIFIER)"
+PROVISIONING_PROFILE_SPECIFIER          = ""
+"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "MorkeTunnel macOS DevID"
+REGISTER_APP_GROUPS                     = YES
+SDKROOT                                 = macosx
+SKIP_INSTALL                            = YES
+SUPPORTED_PLATFORMS                     = macosx
+SWIFT_APPROACHABLE_CONCURRENCY          = YES
+SWIFT_OBJC_BRIDGING_HEADER              = "MorkeTunnel/MorkeTunnel-Bridging-Header.h"
+SWIFT_STRICT_CONCURRENCY                = complete
+SWIFT_VERSION                           = 6.0
+```
+
+`INFOPLIST_FILE` is the Morke tree's path; the file is published as
+`macOS/MorkeTunnel-macOS-Info.plist` ([MANIFEST.md](MANIFEST.md) block B). The
+`MORKE_*` settings are expanded into the entitlements and the `Info.plist` below.
+`CURRENT_PROJECT_VERSION` is the line that moves between releases (one build
+counter serves both platforms); at build `5` every other line above is unchanged.
+
+**Debug builds a development variant, "Morke Dev", that is not conveyed.** It
+differs from Release in these lines and nothing else:
+
+```
+"CODE_SIGN_IDENTITY[sdk=macosx*]"       (not set)
+CODE_SIGN_STYLE                         = Automatic
+MORKE_APP_GROUP                         = group.tech.twodice.morke.dev
+MORKE_DISPLAY_NAME                      = "Morke Dev"
+MORKE_KEYCHAIN_GROUP                    = tech.morke.dev.shared
+MORKE_NE_PROVIDER                       = packet-tunnel-provider
+PRODUCT_BUNDLE_IDENTIFIER               = tech.twodice.morke.dev.tunnel
+PRODUCT_NAME                            = tech.twodice.morke.tunnel
+PROVISIONING_PROFILE_SPECIFIER          (neither form set)
+```
+
+`MorkeShared` selects the matching Debug identifiers with `#if os(macOS) && DEBUG`,
+so the settings and the code must move together.
+
+**Three of these are load-bearing on macOS:**
+
+- **`PRODUCT_NAME` resolves to `tech.twodice.morke.tunnel`** in both configurations. An embedded
+  system extension's bundle name must equal its bundle identifier for macOS to
+  activate it, so the product is `tech.twodice.morke.tunnel.systemextension`.
+- **`MORKE_NE_PROVIDER = packet-tunnel-provider-systemextension`** in Release. A
+  Developer ID signed system extension claims the `-systemextension` form of the
+  Network Extension entitlement; an Apple Development profile allows the plain
+  `packet-tunnel-provider` only, which is why Debug differs.
+- **`ENABLE_HARDENED_RUNTIME = YES`** with the Developer ID identity: Apple
+  notarizes nothing distributed outside the App Store without the hardened runtime.
+
+As on iOS, the target sets no `SWIFT_DEFAULT_ACTOR_ISOLATION` (§ 3).
+
+### What the macOS target compiles and links
+
+The macOS target lists its sources explicitly in the project; it is not a
+synchronized group:
+
+| Compiled | From |
+|---|---|
+| `PacketTunnelProvider.swift`, `SingBoxTunnel.swift`, `ExtensionPlatformInterface.m`, `MorkeTunnelNetHelpers.c` | `MorkeTunnel/`, with its headers and bridging header |
+| `main.swift` | `MorkeTunnelMac/`, the host above |
+
+`MorkeTunnel/TunnelAnalytics.swift` is the iOS extension's alone. The target
+bundles no resources.
+
+| Link | Kind |
+|---|---|
+| `Libbox.xcframework` | vendored, built in § 2 above (the `macos-arm64_x86_64` slice, a static `ar` archive) |
+| `MorkeShared` | the SwiftPM module in this repository |
+| `NetworkExtension.framework`, `SystemConfiguration.framework`, `Cocoa.framework`, `Carbon.framework`, `CoreText.framework`, `UniformTypeIdentifiers.framework` | system |
+| `libresolv.tbd`, `libbsm.tbd` | system |
+
+### macOS bundle configuration
+
+`macOS/MorkeTunnel-macOS-Info.plist` (checked in, not generated):
+
+```xml
+<key>CFBundlePackageType</key>       <string>SYSX</string>
+<key>NetworkExtension</key>
+<dict>
+  <key>NEMachServiceName</key>       <string>$(MORKE_APP_GROUP).tunnel</string>
+  <key>NEProviderClasses</key>
+  <dict>
+    <key>com.apple.networkextension.packet-tunnel</key>
+    <string>PacketTunnelProvider</string>
+  </dict>
+</dict>
+```
+
+`MorkeTunnel-macOS.entitlements`:
+
+```
+com.apple.developer.networking.networkextension = [$(MORKE_NE_PROVIDER)]
+com.apple.security.app-sandbox                  = true
+com.apple.security.application-groups           = [$(MORKE_APP_GROUP)]
+com.apple.security.network.client               = true
+com.apple.security.network.server               = true
+keychain-access-groups                          = [$(AppIdentifierPrefix)$(MORKE_KEYCHAIN_GROUP)]
+```
+
+### The behavioural split
+
+The one behavioural difference the sources encode is that the macOS system
+extension runs sandboxed **as root**, in the system context, where neither the
+user's data-protection keychain nor the login keychain is reachable (so it makes
+no `SecItem` call at all) and the App Group container it reaches is root's. So on
+macOS the tunnel configuration never travels in `providerConfiguration`, whose
+store every local account can read: the app puts it over the extension's XPC
+service (the host above), and the extension keeps it in a `0600` cache in its own
+container. On iOS it lives in the shared Keychain. On both, `providerConfiguration`
+carries only a non-secret flag. `AppGroup`, `SharedKeychain`, `TunnelConfigCache`,
+`TunnelControl`, `PacketTunnelProvider` and `main.swift` carry that split.
 
 ---
 

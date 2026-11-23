@@ -14,7 +14,9 @@ because the list changes.
 
 > A file belongs in this repository **if and only if** it is either
 >
-> **(1)** compiled or linked into `MorkeTunnel.appex`, or
+> **(1)** compiled or linked into the tunnel extension, `MorkeTunnel.appex` on
+> iOS or the system extension `tech.twodice.morke.tunnel.systemextension` on
+> macOS, or
 > **(2)** required to generate, install or run that object code — bundle
 > configuration, entitlements, privacy manifest, and the build recipe and
 > settings.
@@ -41,6 +43,10 @@ cannot be generated or installed, so they are inside the definition.
   target (`MorkeTunnel (macOS)`) lists its sources explicitly in the project file —
   a new file joins it only when added there (found by P9g, 2026-10-06). Either way
   the file is in: it is compiled into the iOS extension.
+- A file the macOS system extension alone compiles → in. Today that is one file,
+  `MorkeTunnelMac/main.swift`, the extension's executable host; it lives outside
+  `MorkeTunnel/` so that the iOS appex never gets an entry point, and it is
+  exported with its own copy (since 2026-11-23, block C).
 - A new file in `MorkeShared/` → in. The whole module is linked.
 - A new module linked by the extension → the whole module joins the perimeter,
   and its own licence position has to be settled before it does. Adding one is
@@ -52,14 +58,18 @@ cannot be generated or installed, so they are inside the definition.
 
 ---
 
-## Resolved list — 2026-11-19
+## Resolved list — 2026-11-23
 
 Left column is the path **in this repository**. `MorkeShared/` is published flat;
-in the Morke tree it lives at `MorkeKit/Sources/MorkeShared/`. Nothing else is
+in the Morke tree it lives at `MorkeKit/Sources/MorkeShared/`. The macOS
+`Info.plist` is published as `macOS/MorkeTunnel-macOS-Info.plist`; in the Morke
+tree it lives at `Config/MorkeTunnel-macOS-Info.plist` (block B). Nothing else is
 remapped.
 
-**33 files in all:** 20 in block A, 3 in B, 2 in C and 8 in D (`singbox-fork/licences.py` joined D on 2026-09-23, P3;
-`MorkeTunnel/TunnelAnalytics.swift` and five `MorkeShared/` files joined A between 2026-10-06 and 2026-11-17).
+**34 files in all:** 21 in block A, 5 in B and 8 in D; block C is a dated record and lists none
+(`MorkeTunnelMac/main.swift` joined A and C's two files moved to B on 2026-11-23; `singbox-fork/licences.py`
+joined D on 2026-09-23, P3; `MorkeTunnel/TunnelAnalytics.swift` and five `MorkeShared/` files joined A between
+2026-10-06 and 2026-11-17).
 
 ### A. Compiled into the extension — GPLv3 § 5(c)
 
@@ -73,6 +83,7 @@ remapped.
 | `MorkeTunnel/MorkeTunnelNetHelpers.c` | `dd32bae6…326033` | 140 |
 | `MorkeTunnel/MorkeTunnelNetHelpers.h` | `b5326097…d7e315` | 106 |
 | `MorkeTunnel/MorkeTunnel-Bridging-Header.h` | `f6a7ac93…90f734` | 29 |
+| `MorkeTunnelMac/main.swift` | `8ada8f06…c39607` | 75 |
 | `MorkeShared/AnalyticsLedger.swift` | `6e2cd1dd…b7e433` | 961 |
 | `MorkeShared/AppGroup.swift` | `b5e22810…fa5e53` | 694 |
 | `MorkeShared/MorkeLog.swift` | `0af77295…929a5d` | 58 |
@@ -86,7 +97,14 @@ remapped.
 | `MorkeShared/TunnelExtensionConstants.swift` | `46fa2095…cdcd02` | 66 |
 | `MorkeShared/VPNSurfaceState.swift` | `129e9210…9512b7` | 237 |
 
-**20 files, 6 213 lines.**
+**21 files, 6 288 lines.**
+
+**Which extension compiles what.** The iOS extension compiles every source file in
+`MorkeTunnel/`. The macOS system extension compiles `PacketTunnelProvider.swift`,
+`SingBoxTunnel.swift`, `ExtensionPlatformInterface.m`, `MorkeTunnelNetHelpers.c` and
+`MorkeTunnelMac/main.swift`, with the same three headers (the bridging header among them);
+`TunnelAnalytics.swift` is the iOS extension's alone. Both link all of `MorkeShared/`.
+[BUILD.md](BUILD.md) § 3 and § 4 give each target's settings.
 
 > **On that number.** The perimeter was measured at **2 079 lines** on
 > 2026-09-04 *before* the GPLv3 § 5(b) notices were written into these files;
@@ -126,6 +144,13 @@ remapped.
 > `MorkeLog.swift` −1, `ExtensionPlatformInterface.m` −3, the bridging header unchanged. Every file
 > still carries its notice (the SPDX check in the release checklist, step 3), so the notices are
 > 8 × 25 + 12 × 40 = 680 lines and the code without them is 6 213 − 680 = **5 533** lines.
+>
+> **Re-measured 2026-11-23: 21 files, 6 288 lines.** That is 6 213 plus `MorkeTunnelMac/main.swift`
+> (75 lines), the macOS system extension's host, which joined this list because the Mac app has been
+> conveyed since 27.0.0 (4) (block C). The twenty files above are unchanged, digest for digest. `main.swift`
+> carries no licence notice of its own: it is published exactly as it shipped, and
+> [COPYING-SCOPE.md](COPYING-SCOPE.md) places every file in this repository under GPL-3.0-or-later. So
+> the notices are still 680 lines and the code without them is 6 288 − 680 = **5 608** lines.
 
 **One system framework joined the extension's links, and the rule adds no file
 for it.** `PacketTunnelProvider.swift` now imports Apple's `WidgetKit`, so that a
@@ -138,48 +163,53 @@ code compiled into the extension from source, and none was added: the extension
 still links `MorkeShared` and `Libbox.xcframework` and nothing else of ours.
 [BUILD.md](BUILD.md) § 3 lists `WidgetKit` with the other system links.
 
-### B. Build inputs — GPLv3 § 1, required for the shipped iOS extension
+### B. Build inputs — GPLv3 § 1, required for the shipped iOS extension and macOS system extension
 
 | Published path | SHA-256 | Lines |
 |---|---|---|
 | `MorkeTunnel/Info.plist` | `c63f1779…35fa02` | 31 |
 | `MorkeTunnel/MorkeTunnel.entitlements` | `9f4f660b…28e1ec` | 18 |
 | `MorkeTunnel/PrivacyInfo.xcprivacy` | `232448fd…7d4f91` | 95 |
-
-These three are in the perimeter under limb (2) of the rule, and this is a
-reading, not a copy of somebody's list: without the `Info.plist` there is no
-`CFBundlePackageType = XPC!` and the extension will not launch; without the
-entitlements it cannot claim the packet-tunnel provider point or reach its App
-Group. They are required to generate and install the object code, so § 1 reaches
-them. They contain no secret.
-
-The complete build-settings table is in [BUILD.md](BUILD.md) § 3 rather than in a
-project file, because the Xcode project also configures targets this licence does
-not cover. That is the one place where a strict reader could ask for more; the
-settings themselves are reproduced verbatim, which is the substance of what § 1
-asks for.
-
-### C. macOS build inputs — included, not yet owed
-
-| Published path | SHA-256 | Lines |
-|---|---|---|
 | `MorkeTunnel/MorkeTunnel-macOS.entitlements` | `b523c86f…560ac3` | 31 |
 | `macOS/MorkeTunnel-macOS-Info.plist` | `546d442b…614215` | 57 |
 
-The same sources also build a macOS **system extension**. That build is not
-conveyed today — only the iOS application ships — so these two are not yet owed
-under § 6. They are published anyway, because the sources here already encode the
-macOS behavioural split and withholding the two files that make it buildable
-would leave the recipient with source that does not build for a platform it
-plainly supports. In the Morke tree the second file lives at
-`Config/MorkeTunnel-macOS-Info.plist`; `Config/` also holds the closed app's own
-build configuration, so only that one file is exported and it is remapped to
-`macOS/`.
+These five are in the perimeter under limb (2) of the rule, and this is a
+reading, not a copy of somebody's list: without the `Info.plist` there is no
+`CFBundlePackageType = XPC!` and the extension will not launch; without the
+entitlements it cannot claim the packet-tunnel provider point or reach its App
+Group. The last two do the same for the macOS system extension: its `Info.plist`
+sets `CFBundlePackageType = SYSX` and the `NEProviderClasses` and
+`NEMachServiceName` keys, and its entitlements claim the system-extension
+packet-tunnel provider, the sandbox, the App Group and the keychain group.
+`PrivacyInfo.xcprivacy` is the iOS extension's; the macOS target bundles no
+resources. All five are required to generate and install the object code, so § 1
+reaches them. They contain no secret.
 
-**When the macOS application is conveyed, these move to block B and the
-`MorkeTunnel (macOS)` target's build settings must be added to BUILD.md § 4.**
-That is the one foreseeable change to this manifest that is an obligation rather
-than tidiness.
+In the Morke tree the macOS `Info.plist` lives at `Config/MorkeTunnel-macOS-Info.plist`;
+`Config/` also holds the closed app's own build configuration, so only that one
+file is exported and it is remapped to `macOS/`.
+
+The complete build-settings tables are in [BUILD.md](BUILD.md) § 3 (iOS) and § 4
+(macOS) rather than in a project file, because the Xcode project also configures
+targets this licence does not cover. That is the one place where a strict reader could ask for more; the
+settings themselves are reproduced verbatim, which is the substance of what § 1
+asks for.
+
+### C. macOS build inputs — owed since 27.0.0 (4), a dated record
+
+Until 2026-11-23 this block listed `MorkeTunnel/MorkeTunnel-macOS.entitlements` and
+`macOS/MorkeTunnel-macOS-Info.plist` as *included, not yet owed*: the same sources
+also build a macOS **system extension**, and while only the iOS application
+shipped that build was not conveyed. They were published anyway, so that the
+source would build for a platform it plainly supports.
+
+**The Mac app has been conveyed since 27.0.0 (4), released on 2026-11-17** by direct
+download (Developer ID, updated by Sparkle), and its system extension is built
+from these sources. So on 2026-11-23 the two files moved to block B, the
+extension's executable host `MorkeTunnelMac/main.swift` joined block A (block E
+had excluded it as not compiled into the iOS appex), and [BUILD.md](BUILD.md) § 4
+gained the `MorkeTunnel (macOS)` target's build settings. The tag `v27.0.0-4`
+names that source; it was applied after the fact, on 2026-11-23.
 
 ### D. Authored for this repository
 
@@ -221,10 +251,9 @@ only, makes no network call and writes nothing.
 
 | Not published | Why |
 |---|---|
-| `Morke.xcodeproj/` | configures targets outside the perimeter; the covered target's settings are reproduced verbatim in BUILD.md instead |
+| `Morke.xcodeproj/` | configures targets outside the perimeter; the two covered targets' settings are reproduced verbatim in BUILD.md § 3 and § 4 instead |
 | `Frameworks/Libbox.xcframework` | a build product, not source. Rebuild it from commit `c005f353…` (tag `v1.14.4`) **plus `singbox-fork/0001-morke-trim.patch`** by BUILD.md § 2, and check it against the digests in § 2.3 |
 | `MorkeKit/Sources/{MorkeFeatures,MorkeServices,MorkeModels,MorkeDesignSystem,PlatformKit}` | linked by the app, never by the extension |
-| `MorkeTunnelMac/main.swift` | the macOS system-extension executable host; not compiled into the iOS appex |
 | `MorkeTunnelTests/`, every other test target | not compiled into the extension |
 | `Config/Debug.xcconfig`, `Config/Release.xcconfig` | the app's configuration, and gitignored locally |
 | `.DS_Store` | Finder metadata. Present in `MorkeTunnel/` on macOS; it is not source and must not be exported |
@@ -234,10 +263,11 @@ only, makes no network call and writes nothing.
 
 ## Verifying this repository
 
-Every file in blocks A–C, in one command from the repository root:
+Every file in blocks A and B, and the `singbox-fork/` files of D, in one command
+from the repository root:
 
 ```sh
-find MorkeTunnel MorkeShared macOS singbox-fork -type f ! -name '.DS_Store' -print0 \
+find MorkeTunnel MorkeShared MorkeTunnelMac macOS singbox-fork -type f ! -name '.DS_Store' -print0 \
   | LC_ALL=C sort -z | xargs -0 shasum -a 256
 ```
 
@@ -245,22 +275,25 @@ Compare against the tables above. A digest that does not match means the file
 changed after this manifest was written — which is the point of recording them.
 They date the snapshot; they are a change detector, not a promise about any
 binary. What the digests **cannot** tell you is whether this source built the
-`.ipa` you downloaded: see [README.md § Provenance](README.md#provenance-and-what-it-does-not-prove).
+`.ipa` or the Mac app you downloaded: see [README.md § Provenance](README.md#provenance-and-what-it-does-not-prove).
 
 ## Regenerating this repository from the Morke tree
 
 Run from the root of the Morke source tree, with `$OUT` an empty directory:
 
 ```sh
-mkdir -p "$OUT/MorkeTunnel" "$OUT/MorkeShared" "$OUT/macOS"
+mkdir -p "$OUT/MorkeTunnel" "$OUT/MorkeShared" "$OUT/MorkeTunnelMac" "$OUT/macOS"
 
-# A + B + C — everything in MorkeTunnel/ except Finder metadata
+# A + B — everything in MorkeTunnel/ except Finder metadata
 find MorkeTunnel -type f ! -name '.DS_Store' -exec cp {} "$OUT/MorkeTunnel/" \;
 
 # A — the shared module, published flat
 cp MorkeKit/Sources/MorkeShared/*.swift "$OUT/MorkeShared/"
 
-# C — the one macOS build input that lives outside MorkeTunnel/
+# A — the macOS system extension's executable host
+cp MorkeTunnelMac/*.swift "$OUT/MorkeTunnelMac/"
+
+# B — the one macOS build input that lives outside MorkeTunnel/
 cp Config/MorkeTunnel-macOS-Info.plist "$OUT/macOS/"
 
 # D — the authored files
@@ -270,7 +303,8 @@ cp -R publish/tunnel-source/singbox-fork "$OUT/"
 
 The first `find` is the rule expressed as a command: `MorkeTunnel/` is a
 file-system-synchronized Xcode group, so its contents and the iOS target's contents
-are the same set by construction (the macOS target compiles a subset of it). That is why the export is a directory copy and
+are the same set by construction (the macOS target compiles a subset of it, plus
+its host in `MorkeTunnelMac/`, which the third copy takes). That is why the export is a directory copy and
 not a hand-kept file list — a hand-kept list is what goes stale.
 
 **Then, before publishing, re-run the safety sweep.** It is not a formality; it
@@ -281,7 +315,8 @@ grep -rniE 'api\.morkenet|morkenet\.com|https?://|apiKey|secret|password|token' 
 grep -rn 'URLSession' "$OUT"
 ```
 
-Expected on 2026-09-23, and read again on 2026-11-19 with the same result: no live secret, no API base URL, and no `URLSession` in
+Expected on 2026-09-23, and read again on 2026-11-19 and on 2026-11-23 (with `MorkeTunnelMac/main.swift`, which
+matches neither grep) with the same result: no live secret, no API base URL, and no `URLSession` in
 any source file — the extension makes no control-plane call at all; the only
 `URLSession` matches are sentences in this repository's documents and in
 `PrivacyInfo.xcprivacy` saying so. The `https://`

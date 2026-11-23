@@ -1,12 +1,15 @@
 # Morke tunnel — Corresponding Source
 
-This repository is the **Corresponding Source** (GNU GPL v3 § 1) for
-`MorkeTunnel.appex`, the Network Extension inside the Morke VPN applications for
-iOS and macOS.
+This repository is the **Corresponding Source** (GNU GPL v3 § 1) for the Morke
+tunnel extension: `MorkeTunnel.appex`, the Network Extension inside the Morke VPN
+application for iOS, and `tech.twodice.morke.tunnel.systemextension`, the system
+extension inside the Morke VPN application for macOS. Both applications ship: the
+iOS one through the App Store, the macOS one by direct download since 27.0.0 (4),
+2026-11-17.
 
 It exists because the extension statically links
 [sing-box](https://github.com/SagerNet/sing-box), which is licensed
-GPL-3.0-or-later. Shipping that through the App Store is **conveying**, and GPLv3
+GPL-3.0-or-later. Shipping that, in either application, is **conveying**, and GPLv3
 § 5(c) requires the entire extension, as a whole, to be licensed under the same
 terms to anyone who comes into possession of a copy. § 6 then requires us to
 offer the source. This is that offer, discharged by publication.
@@ -39,6 +42,8 @@ that is dual-licensed, and why an automatic detector may label this repository
 | `MorkeTunnel/MorkeTunnelNetHelpers.c/.h` | pure-C address and interface-classification helpers, split out so they can be unit-tested off-device |
 | `MorkeTunnel/MorkeTunnel-Bridging-Header.h` | Swift ↔ Objective-C bridging header |
 | `MorkeTunnel/Info.plist`, `*.entitlements`, `PrivacyInfo.xcprivacy` | the bundle configuration and build inputs needed to generate and install the extension |
+| `MorkeTunnelMac/main.swift` | the macOS system extension's executable host: it starts NetworkExtension's system-extension mode and the XPC service the Mac app reaches the extension through |
+| `macOS/MorkeTunnel-macOS-Info.plist` | the macOS system extension's bundle configuration |
 | `MorkeShared/` | the app↔extension surface module the extension links: App Group keys, shared-Keychain accessors, the opaque configuration wrapper, the `os_log` subsystem, the diagnostics wire types |
 | `LICENSE` | the GNU GPL v3 text, verbatim and alone — nothing added before or after it |
 | `COPYING-SCOPE.md` | what that licence covers and what it does not: the perimeter, the dual-licensed module, the sing-box naming term, and the `-only` / `-or-later` label question |
@@ -83,8 +88,8 @@ that is deliberate.
 They are left intact because GPLv3 § 1 asks for *"the preferred form of the work
 for making modifications"*, and in this code the reasoning **is** the value — why
 `ENABLE_DEBUG_DYLIB` must be `NO`, why nothing touches libbox during class
-initialisation, why the configuration lives in the Keychain on iOS and in
-`providerConfiguration` on macOS, what the IPv6 leak block is defending against.
+initialisation, why the configuration lives in the Keychain on iOS and in the
+system extension's own root-only cache on macOS, what the IPv6 leak block is defending against.
 Editing that out to tidy the presentation would hand you a worse artefact than
 the one we build from, and would make the published source diverge from the
 shipped source. Treat an unresolvable identifier as a bookmark for a decision
@@ -126,17 +131,19 @@ recipient who never visits this repository still receives them.
 
 ## Provenance, and what it does not prove
 
-Each App Store submission tags this repository with the exact
-`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` of the build submitted, so the
-§ 6(d) directions next to the object code resolve to the source that produced it.
-`BUILD.md` records the sing-box pin and the complete build configuration.
+Each App Store submission and each Mac release tags this repository with the
+exact `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` of the build, as
+`v<MARKETING_VERSION>-<CURRENT_PROJECT_VERSION>`, so the § 6(d) directions next to
+the object code resolve to the source that produced it. The two platforms share
+one build counter, so every tag names one build. `BUILD.md` records the sing-box
+pin and the complete build configuration of both targets.
 
 **That is provenance. It is not proof of build equivalence, and no such proof is
 offered here.** Building this source will not reproduce the shipped binary
-bit-for-bit, and we do not claim it will. Two reasons, both outside our control:
-Apple re-signs and encrypts the binary it delivers, and Swift and Xcode builds
-are not bit-reproducible in the first place. Anyone telling you a published iOS
-source tree proves what is in a downloaded `.ipa` is overstating it.
+bit-for-bit, and we do not claim it will. On iOS, Apple re-signs and encrypts the
+binary it delivers; on both platforms, Swift and Xcode builds are not
+bit-reproducible in the first place. Anyone telling you a published source tree
+proves what is in a downloaded `.ipa` or Mac app is overstating it.
 
 What *can* be checked independently, and is worth more than a promise:
 
@@ -168,12 +175,15 @@ What *can* be checked independently, and is worth more than a promise:
 
 ## A note on the Apple Team ID
 
-`MorkeShared/SharedKeychain.swift` contains the literal Team ID `VM3XX8889Q` as a
-documented fallback Keychain access-group prefix, used only when the runtime
-value cannot be resolved. It is published knowingly. It is not a secret: it is
-recoverable from any signed Apple binary and from the provisioning profile, and
-it authorises nothing on its own. If you rebuild this extension under your own
-signing identity, that constant and the bundle identifiers in `BUILD.md` are what
+The literal Team ID `VM3XX8889Q` appears in two source files.
+`MorkeShared/SharedKeychain.swift` holds it as a documented fallback Keychain
+access-group prefix, used only when the runtime value cannot be resolved, and
+`MorkeShared/TunnelControl.swift` holds it as `teamIdentifier`, the team the macOS
+system extension's code-signing requirement names when it accepts a connection
+from the app. It is published knowingly. It is not a secret: it is recoverable
+from any signed Apple binary and from the provisioning profile, and it authorises
+nothing on its own. If you rebuild this extension under your own signing
+identity, those two constants and the bundle identifiers in `BUILD.md` are what
 you change.
 
 ## Contributing — pull requests are not the route here
